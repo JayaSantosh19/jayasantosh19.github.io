@@ -401,28 +401,137 @@
             </div>
         </div>
     </div>
-	
-	
+
+	<pre class="bg-light border rounded p-3" style="max-height: 500px; overflow: auto;"><code>&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;style&gt;
+  textarea {overflow:auto;word-wrap:normal;white-space:pre}
+  td.rtalign {text-align:right;vertical-align:top}
+&lt;/style&gt;
+&lt;script&gt;
+var sessionId;
+function loadXMLDoc()
+{
+var xmlhttp;
+if (window.XMLHttpRequest)
+  {// code for IE7+, Firefox, Chrome, Opera, Safari
+  xmlhttp=new XMLHttpRequest();
+  }
+else
+  {// code for IE6, IE5
+  xmlhttp=new ActiveXObject("Microsoft.XMLHTTP");
+  }
+  xmlhttp.onreadystatechange=function()
+    {document.getElementById("outxml").value="Processing...";
+  if (xmlhttp.readyState==4 && xmlhttp.status==200)
+    {
+      x=xmlhttp.responseText;
+      var rplc = "    ";
+      document.getElementById("outxml").value=x.substring(x.indexOf('&lt;soapenv:Body&gt;') + 19, x.indexOf('&lt;/soapenv:Body&gt;', x.length-50)).replace(/\n    /g, "\n");//getXmlString(xmlhttp.responseXML);
+    }
+  }
+    //alert("before open");
+xmlhttp.open("POST",getEnvURL() + "niku/xog",true);
+xmlhttp.setRequestHeader('Content-Type', "text/xml");
+  //alert("send");
+  //alert("Sending - " + getXML());
+xmlhttp.send(getXML());
+}
+  function getXML(){
+  if(!(sessionId)){readCookie("sessionId");}
+    var sr ='&lt;?xml version="1.0" encoding="utf-8"?&gt;' +
+            '&lt;soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" ' +
+                              'xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" ' +
+                              'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ' +
+                              'xmlns:xsd="http://www.w3.org/2001/XMLSchema"&gt;' +
+               '&lt;soapenv:Header&gt;'+
+                         '&lt;xog:Auth xmlns:xog="http://www.niku.com/xog/Object"&gt;' +
+                                 '&lt;xog:SessionID&gt;' + sessionId + '&lt;/xog:SessionID&gt;' +
+                         '&lt;/xog:Auth&gt;' +            
+                 '&lt;/soapenv:Header&gt;'+
+                 '&lt;soapenv:Body&gt;'+
+        document.getElementById('hideinxml').value.replace('&lt;?xml version="1.0" encoding="UTF-8"?&gt;', '') +
+                 '&lt;/soapenv:Body&gt;'+
+            '&lt;/soapenv:Envelope&gt;';
+    return sr;
+  }
  
-	
-	<textarea>
-	 <tr>
-      <td style=""><input id="btnCallWebService" onclick="loadXMLDoc()" style="width:70px" value="Run" type="button" /></td>
-      <td></td>
-      <td><!--input id="tstbtnCallWebService" style="width:70px" onclick="alert(getXML());soapCall();alert('Finished Call');" value="Test" type="button" /--></td>
-    </tr>
-    <tr>
-      <td style=""></td>
-      <td style="width:70px" class="rtalign"><label for="xml">XML Output</label></td>
-      <td><textarea id="outxml" wrap="off" cols="100" rows="20"></td>
-    </tr>
-    <tr>
-      <td style=""><img src="ui/images/FlagRequired.gif" /><label for="xml"> = Required</label></td>
-      <td></td>
-      <td></td>
-    </tr>
-  </table>
-	</textarea>
+         function getEnvURL() {  
+          return document.URL.split("niku/")[0];
+        }
+  function readCookie(name) {
+        var nameEQ = name + "=";
+        var ca = document.cookie.split(';');
+        for(var i=0;i &lt; ca.length;i++) {
+                var c = ca[i];
+                while (c.charAt(0)==' ') c = c.substring(1,c.length);
+                if (c.indexOf(nameEQ) == 0) sessionId= c.substring(nameEQ.length,c.length);
+                }
+				  var xmlhttp;
+  xmlhttp=new XMLHttpRequest();
+  try
+  {
+	  xmlhttp.open("GET", "/ppm/rest/v1/auth/login", false); 
+	  xmlhttp.onreadystatechange = function() 
+	  {
+		  if (xmlhttp.readyState == 4) 
+		  { 
+			  
+			if (xmlhttp.status == 200) {
+			  var textkey=xmlhttp.responseText;
+			  var responJson=JSON.parse(textkey);
+			  var sessID=responJson["authToken"];
+			  //alert(sessID);
+			  sessionId= sessID.toString();
+
+			  }
+			  else if (xmlhttp.status != 200) {alert("something went wrong....\n Please refresh the page");}
+		  }
+	  }
+	  xmlhttp.send();
+	}
+	catch (ex)
+	{
+		alert("Error connecting");
+		console.log(ex.message);
+	}		
+
+        }
+         function getXmlString(xml) {
+                 if (window.ActiveXObject) { return xml.xml; }
+         return new XMLSerializer().serializeToString(xml);
+}
+&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+ 
+&lt;input type="hidden" id="hideinxml" name="hideinxml" &gt;
+&lt;table&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;/td&gt;
+    &lt;td style="width:70px" class="rtalign"&gt;&lt;img src="ui/images/FlagRequired.gif"/&gt;&lt;label for="xml" &gt;XML&lt;/label&gt;&lt;/td&gt;
+  &lt;td&gt;&lt;textarea name="inxml" wrap="off" cols="100" rows="20" onblur="document.getElementById('hideinxml').value = this.value;"&gt;&lt;/textarea&gt;&lt;/td&gt;
+  &lt;tr&gt;
+  &lt;tr&gt;
+    &lt;td style=""&gt;&lt;input id="btnCallWebService" onclick="loadXMLDoc()" style="width:70px" value="Run" type="button" /&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;!--input id="tstbtnCallWebService" style="width:70px" onclick="alert(getXML());soapCall();alert('Finished Call');" value="Test" type="button" /--&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+  &lt;td style=""&gt;&lt;/td&gt;
+    &lt;td style="width:70px" class="rtalign"&gt;&lt;label for="xml"&gt;XML Output&lt;/label&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;textarea id="outxml" wrap="off" cols="100" rows="20"&gt;&lt;/textarea&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;tr&gt;
+  &lt;td style=""&gt;&lt;img src="ui/images/FlagRequired.gif"/&gt;&lt;label for="xml"&gt; = Required&lt;/label&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/table&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
 	
 	
 </body>
