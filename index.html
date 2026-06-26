@@ -401,6 +401,156 @@
             </div>
         </div>
     </div>
+	
+	
+	--- XOG Client 
+	
+	<textarea rows="6" cols="50" readonly>
+	<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <title></title>
+  <style>
+    textarea {
+      overflow: auto;
+      word-wrap: normal;-
+      white-space: pre;
+    }
+
+    td.rtalign {
+      text-align: right;
+      vertical-align: top;
+    }
+  </style>
+  <script>
+
+    var sessionId;
+
+    jQuery.get('/ppm/rest/v1/auth/login', function (data, status) {
+      sessionId = data.authToken;
+    });
+
+    function loadXMLDoc() {
+
+      var xmlhttp;
+      if (window.XMLHttpRequest) {// code for IE7+, Firefox, Chrome, Opera, Safari
+        xmlhttp = new XMLHttpRequest();
+      }
+      else {// code for IE6, IE5
+        xmlhttp = new ActiveXObject("Microsoft.XMLHTTP");
+      }
+      xmlhttp.onreadystatechange = function () {
+        document.getElementById("outxml").value = "Transmitting Data...";
+        if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
+          x = xmlhttp.responseText;
+
+          var rplc = "    ";
+          document.getElementById("outxml").value = x.substring(x.indexOf('<soapenv:Body>') + 19, x.indexOf('</soapenv:Body>', x.length - 50)).replace(/\n    /g, "\n");//getXmlString(xmlhttp.responseXML);
+
+        }
+      }
+
+      xmlhttp.open("POST", getEnvURL() + "niku/xog", true);
+      xmlhttp.setRequestHeader('Content-Type', "text/xml");
+      xmlhttp.send(getXML());
+    }
+
+    function getXML() {
+      var sr = '\
+<?xml version="1.0" encoding="utf-8"?> \
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:soapenc="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema"> \
+  <soapenv:Header> \
+    <xog:Auth xmlns:xog="http://www.niku.com/xog/Object"> \
+      <xog:SessionID>' + readSession() + '</xog:SessionID> \
+    </xog:Auth> \
+  </soapenv:Header> \
+  <soapenv:Body>' + document.getElementById('hideinxml').value.replace('<?xml version="1.0" encoding="UTF-8"?>', '') + '</soapenv:Body>\
+</soapenv:Envelope>';
+      return sr;
+    }
+
+    function getEnvURL() {
+      return document.URL.split("niku/")[0];
+    }
+
+    function readSession() {
+      var cookieSessionId = readCookie('sessionId');
+      if (cookieSessionId) {
+        return cookieSessionId;
+      }
+      else if (window.clarity.session.sessionId) {
+        return window.clarity.session.sessionId;
+      }
+      else {
+        var sessionJSON;
+        try {
+          sessionJSON = JSON.parse(sessionStorage.getItem(sessionStorage.key(0)));
+        }
+        catch (e) {
+        }
+        if (sessionJSON && sessionJSON['authToken'])
+          return sessionJSON['authToken'];
+        else {
+          return sessionId;
+        }
+      }
+    }
+
+    function readCookie(name) {
+      var nameEQ = name + "=";
+      var ca = document.cookie.split(';');
+      for (var i = 0; i < ca.length; i++) {
+        var c = ca[i];
+        while (c.charAt(0) == ' ') {
+          c = c.substring(1, c.length);
+        }
+        if (c.indexOf(nameEQ) == 0) {
+          return c.substring(nameEQ.length, c.length);
+        }
+      }
+      return null;
+    }
+
+    function getXmlString(xml) {
+      if (window.ActiveXObject) {
+        return xml.xml;
+      }
+      return new XMLSerializer().serializeToString(xml);
+    }
+  </script>
+</head>
+<body>
+
+  <input type="hidden" id="hideinxml" name="hideinxml">
+  <table>
+    <tr>
+      <td></td>
+      <td style="width:70px" class="rtalign"><img src="ui/images/FlagRequired.gif" /><label for="xml">XML</label></td>
+      <td><textarea name="inxml" wrap="off" cols="100" rows="20" onblur="document.getElementById('hideinxml').value = this.value;"></textarea></td>
+    </tr>
+    <tr>
+      <td style=""><input id="btnCallWebService" onclick="loadXMLDoc()" style="width:70px" value="Run" type="button" /></td>
+      <td></td>
+      <td><!--input id="tstbtnCallWebService" style="width:70px" onclick="alert(getXML());soapCall();alert('Finished Call');" value="Test" type="button" /--></td>
+    </tr>
+    <tr>
+      <td style=""></td>
+      <td style="width:70px" class="rtalign"><label for="xml">XML Output</label></td>
+      <td><textarea id="outxml" wrap="off" cols="100" rows="20"></textarea></td>
+    </tr>
+    <tr>
+      <td style=""><img src="ui/images/FlagRequired.gif" /><label for="xml"> = Required</label></td>
+      <td></td>
+      <td></td>
+    </tr>
+  </table>
+</body>
+</html>
+	</textarea>
+	
+	
 </body>
 
 </html>
