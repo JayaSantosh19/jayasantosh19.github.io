@@ -402,14 +402,87 @@
         </div>
     </div>
 
-	<textarea> </textare><NikuDataBus xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="../xsd/nikuxog_processnotification.xsd">
-	<Header version="12.0" action="read" objectType="processnotification" externalSource="NIKU"/>
-	<Query>
-		<Filter name="languageCode" criteria="EQUALS">en</Filter>
-		<Filter name="notificationCode" criteria="EQUALS">PROCESS_STEP_COMPLETED.OBJECT</Filter>
-		<Filter name="process_code" criteria="EQUALS">AssignRisk</Filter>
-	</Query>
-</NikuDataBus> </textarea>
+	<textarea> 
+	SELECT @select:dim:user_def:implied:timeentry:te.prid:timeentry_id@,
+       @select:dim_prop:user_def:implied:timeentry:inv.id:investment_int_id@,
+       @select:dim_prop:user_def:implied:timeentry:inv.code:investment_id@,
+       @select:dim_prop:user_def:implied:timeentry:inv.name:investment_name@,
+       @select:dim_prop:user_def:implied:timeentry:inv.odf_object_code:investment_type@,         
+       @select:dim_prop:user_def:implied:timeentry:@UPPER@(inv.odf_object_code):investment_type_upper@,
+       @select:dim_prop:user_def:implied:timeentry:inv.manager_id:investment_manager_int_id@,
+       @select:dim_prop:user_def:implied:timeentry:manager.full_name:investment_manager@,
+       @select:dim_prop:user_def:implied:timeentry:t.prid:task_int_id@,
+       @select:dim_prop:user_def:implied:timeentry:t.prexternalid:task_id@,
+       @select:dim_prop:user_def:implied:timeentry:t.prname:task_name@,
+       @select:dim_prop:user_def:implied:timeentry:t.prwbssequence:wbs_sequence@,
+       @select:dim_prop:user_def:implied:timeentry:a.prid:assignment_int_id@,         
+       @select:dim_prop:user_def:implied:timeentry:r.id:resource_int_id@,
+       @select:dim_prop:user_def:implied:timeentry:r.full_name:resource_name@,
+       @select:dim_prop:user_def:implied:timeentry:r.person_type:resource_type_id@,
+       @select:dim_prop:user_def:implied:timeentry:v.name:resource_type@,
+       @select:dim_prop:user_def:implied:timeentry:ts.prid:timesheet_int_id@,  
+       @select:dim_prop:user_def:implied:timeentry:'/niku/app?action=timeadmin.editTimesheet&id=' @+@ @DBUSER@.CMN_TO_CHAR_FCT(ts.prid) 
+               @+@ '&' @+@ 'resid=' @+@ @DBUSER@.CMN_TO_CHAR_FCT(r.id) @+@ '&' @+@ 'tpid=' @+@ @DBUSER@.CMN_TO_CHAR_FCT(tp.prid):timesheet_link@, 
+       @select:dim_prop:user_def:implied:timeentry:ts.prstatus:timesheet_status_id@,
+       @select:dim_prop:user_def:implied:timeentry:v2.name:timesheet_status@,
+       @select:dim_prop:user_def:boolean:timeentry:ts.prisadjustment:is_adjustment@,
+       @select:dim_prop:user_def:implied:timeentry:tp.prid:time_period_int_id@,
+       @select:dim_prop:user_def:implied:timeentry:tp.prstart:time_period_start@,
+       @select:dim_prop:user_def:implied:timeentry:@DBUSER@.COP_CALC_FINISH_TIME_FCT(tp.prfinish):time_period_end@,
+       @select:dim_prop:user_def:boolean:timeentry:CASE WHEN @NVL@(note.note_id,0) = 0 THEN 0 ELSE 1 END:note_attached@,
+       @select:metric:user_def:implied:SUM(CASE WHEN ts.prstatus > 3 THEN 0 ELSE @NVL@(te.practsum,0)/(CASE WHEN r.resource_type > 1 THEN 1 ELSE 3600 END) END):pending_actuals@,
+       @select:metric:user_def:implied:SUM(CASE WHEN ts.prstatus < 4 THEN 0 ELSE @NVL@(te.practsum,0)/(CASE WHEN r.resource_type > 1 THEN 1 ELSE 3600 END) END):posted_actuals@,
+       @select:metric:user_def:implied:SUM(@NVL@(te.practsum,0)/(CASE WHEN r.resource_type > 1 THEN 1 ELSE 3600 END)):total_actuals@
+
+FROM   PRTIMEENTRY te
+INNER  JOIN  PRASSIGNMENT a
+       ON    a.prid = te.prassignmentid
+INNER  JOIN  PRTASK t
+       ON    t.prid = a.prtaskid 
+INNER  JOIN  INV_INVESTMENTS inv
+       ON    inv.id = t.prprojectid
+       AND   inv.is_active <> 0	
+       AND   inv.id = @NVL@(@WHERE:PARAM:XML:INTEGER:/data/id/@value@, inv.id)
+LEFT   OUTER JOIN SRM_RESOURCES manager
+             ON   manager.user_id = inv.manager_id  
+INNER  JOIN  SRM_RESOURCES r
+       ON    r.id = a.prresourceid 
+LEFT   OUTER JOIN CMN_LOOKUPS_V v
+             ON   v.id = r.person_type
+             AND  v.lookup_type = 'SRM_RESOURCE_TYPE'
+             AND  v.language_code= @WHERE:PARAM:LANGUAGE@
+INNER  JOIN  PRTIMESHEET ts
+       ON    ts.prid = te.prtimesheetid
+       AND   ts.prstatus <> 5 -- Exclude adjusted timesheets
+LEFT   OUTER JOIN CMN_LOOKUPS_V v2
+             ON   v2.lookup_enum = ts.prstatus
+             AND  v2.lookup_type = 'TIMESHEET_STATUS'
+             AND  v2.language_code = @WHERE:PARAM:LANGUAGE@  
+INNER  JOIN  prtimeperiod tp
+       ON    tp.prid =  ts.prtimeperiodid     
+LEFT   OUTER JOIN (SELECT te.prid entry_id, MAX(tn.prid) note_id
+                   FROM   PRTIMEENTRY te
+                   INNER  JOIN PRNOTE tn
+                          ON   te.prid = tn.prrecordid
+                          AND  tn.prtablename = 'PRTimeEntry'
+                   GROUP  BY te.prid) note
+             ON   note.entry_id= te.prid
+LEFT   OUTER JOIN prj_obs_associations assoc
+             ON   assoc.record_id = inv.id
+             AND  assoc.table_name = 'SRM_PROJECTS'
+             AND  (( @WHERE:PARAM:USER_DEF:INTEGER:OBS@ IS NULL AND 1=2 ) OR ( @WHERE:PARAM:USER_DEF:INTEGER:OBS@ IS NOT NULL ))
+LEFT   OUTER JOIN prj_obs_units_flat flat
+             ON   flat.unit_id = assoc.unit_id		
+             AND  (( flat.branch_unit_id IS NULL ) OR (@WHERE:PARAM:USER_DEF:INTEGER:flat.branch_unit_id:OBS@ ))
+
+WHERE  (   ( @WHERE:PARAM:USER_DEF:INTEGER:p_includeOther@ = 1 )
+        OR ( @WHERE:PARAM:USER_DEF:INTEGER:p_includeOther@ <> 1 AND  inv.odf_object_code = 'project' ) 
+        OR ( @WHERE:PARAM:USER_DEF:INTEGER:p_includeOther@ IS NULL ) )
+AND    @WHERE:SECURITY:INV:inv.id@
+AND    @FILTER@
+GROUP  BY te.prid, inv.id, inv.code, inv.name, inv.odf_object_code, inv.manager_id, manager.full_name, t.prid, t.prexternalid, t.prname, t.prwbssequence, 
+          a.prid, r.id, r.full_name, r.person_type, v.name, ts.prid, ts.prstatus, v2.name, ts.prisadjustment, tp.prid, tp.prstart, tp.prfinish, note.note_id
+		  </textarea>
 
 	
 	
