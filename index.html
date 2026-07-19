@@ -403,86 +403,487 @@
     </div>
 
 	<textarea> 
-	SELECT @select:dim:user_def:implied:timeentry:te.prid:timeentry_id@,
-       @select:dim_prop:user_def:implied:timeentry:inv.id:investment_int_id@,
-       @select:dim_prop:user_def:implied:timeentry:inv.code:investment_id@,
-       @select:dim_prop:user_def:implied:timeentry:inv.name:investment_name@,
-       @select:dim_prop:user_def:implied:timeentry:inv.odf_object_code:investment_type@,         
-       @select:dim_prop:user_def:implied:timeentry:@UPPER@(inv.odf_object_code):investment_type_upper@,
-       @select:dim_prop:user_def:implied:timeentry:inv.manager_id:investment_manager_int_id@,
-       @select:dim_prop:user_def:implied:timeentry:manager.full_name:investment_manager@,
-       @select:dim_prop:user_def:implied:timeentry:t.prid:task_int_id@,
-       @select:dim_prop:user_def:implied:timeentry:t.prexternalid:task_id@,
-       @select:dim_prop:user_def:implied:timeentry:t.prname:task_name@,
-       @select:dim_prop:user_def:implied:timeentry:t.prwbssequence:wbs_sequence@,
-       @select:dim_prop:user_def:implied:timeentry:a.prid:assignment_int_id@,         
-       @select:dim_prop:user_def:implied:timeentry:r.id:resource_int_id@,
-       @select:dim_prop:user_def:implied:timeentry:r.full_name:resource_name@,
-       @select:dim_prop:user_def:implied:timeentry:r.person_type:resource_type_id@,
-       @select:dim_prop:user_def:implied:timeentry:v.name:resource_type@,
-       @select:dim_prop:user_def:implied:timeentry:ts.prid:timesheet_int_id@,  
-       @select:dim_prop:user_def:implied:timeentry:'/niku/app?action=timeadmin.editTimesheet&id=' @+@ @DBUSER@.CMN_TO_CHAR_FCT(ts.prid) 
-               @+@ '&' @+@ 'resid=' @+@ @DBUSER@.CMN_TO_CHAR_FCT(r.id) @+@ '&' @+@ 'tpid=' @+@ @DBUSER@.CMN_TO_CHAR_FCT(tp.prid):timesheet_link@, 
-       @select:dim_prop:user_def:implied:timeentry:ts.prstatus:timesheet_status_id@,
-       @select:dim_prop:user_def:implied:timeentry:v2.name:timesheet_status@,
-       @select:dim_prop:user_def:boolean:timeentry:ts.prisadjustment:is_adjustment@,
-       @select:dim_prop:user_def:implied:timeentry:tp.prid:time_period_int_id@,
-       @select:dim_prop:user_def:implied:timeentry:tp.prstart:time_period_start@,
-       @select:dim_prop:user_def:implied:timeentry:@DBUSER@.COP_CALC_FINISH_TIME_FCT(tp.prfinish):time_period_end@,
-       @select:dim_prop:user_def:boolean:timeentry:CASE WHEN @NVL@(note.note_id,0) = 0 THEN 0 ELSE 1 END:note_attached@,
-       @select:metric:user_def:implied:SUM(CASE WHEN ts.prstatus > 3 THEN 0 ELSE @NVL@(te.practsum,0)/(CASE WHEN r.resource_type > 1 THEN 1 ELSE 3600 END) END):pending_actuals@,
-       @select:metric:user_def:implied:SUM(CASE WHEN ts.prstatus < 4 THEN 0 ELSE @NVL@(te.practsum,0)/(CASE WHEN r.resource_type > 1 THEN 1 ELSE 3600 END) END):posted_actuals@,
-       @select:metric:user_def:implied:SUM(@NVL@(te.practsum,0)/(CASE WHEN r.resource_type > 1 THEN 1 ELSE 3600 END)):total_actuals@
+		<gel:script xmlns:core="jelly:core" xmlns:file="jelly:com.niku.union.gel.FileTagLibrary" xmlns:gel="jelly:com.niku.union.gel.GELTagLibrary"
+  xmlns:sql="jelly:sql" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <!--
+	Rego Consulting
+	Script: Clarity Health Checks
+	Revision: V1.0
+	
+	Raw/Detailed Health Check exports
+	
+	Version Log:
+	
+	V1.0 / 2024-06-05 / Chris Ciavarella - Rego Consulting / Initial Release
+	
+	-->
+  <!-- SET THE PARAMETERS -->
+  <gel:parameter default="admin" var="xogUserName"/>
+  <gel:parameter default="/fs0/clarity1/share/HealthCheck" var="filePath"/>
+  <gel:parameter default="0" var="debug"/>
+  <core:set value="0" var="breakError"/>
+  <core:set value="0" var="isError"/>
+  <core:set value="1" var="write"/>
+  <!-- ESTABLISH FOR EACH LOOP FOR EXCEPTION HANDLING -->
+  <core:forEach begin="0" end="0" step="1" var="i">
+    <!-- CATCH ALL -->
+    <core:catch var="gException">
+      <!-- GET START TIME OF PROCESS -->
+      <core:invokeStatic className="java.lang.System" method="currentTimeMillis" var="processStartTime"/>
+      <!-- CONNECT TO CLARITY DATABASE -->
+      <gel:setDataSource dbId="niku" var="clarityDB"/>
+      <!-- ***************************** -->
+      <!-- //START: HEALTH CHECK QUERIES -->
+      <!-- ***************************** -->
+      <!-- INITIALIZE THE ARRAY -->
+      <!-- <core:new className="java.util.ArrayList" var="sql_hash" /> -->
+      <core:new className="java.util.LinkedHashMap" var="sql_hash"/>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[
+			-- Q1 - PROCESS DEFINITIONS --
+			-- PE1.1 --
 
-FROM   PRTIMEENTRY te
-INNER  JOIN  PRASSIGNMENT a
-       ON    a.prid = te.prassignmentid
-INNER  JOIN  PRTASK t
-       ON    t.prid = a.prtaskid 
-INNER  JOIN  INV_INVESTMENTS inv
-       ON    inv.id = t.prprojectid
-       AND   inv.is_active <> 0	
-       AND   inv.id = @NVL@(@WHERE:PARAM:XML:INTEGER:/data/id/@value@, inv.id)
-LEFT   OUTER JOIN SRM_RESOURCES manager
-             ON   manager.user_id = inv.manager_id  
-INNER  JOIN  SRM_RESOURCES r
-       ON    r.id = a.prresourceid 
-LEFT   OUTER JOIN CMN_LOOKUPS_V v
-             ON   v.id = r.person_type
-             AND  v.lookup_type = 'SRM_RESOURCE_TYPE'
-             AND  v.language_code= @WHERE:PARAM:LANGUAGE@
-INNER  JOIN  PRTIMESHEET ts
-       ON    ts.prid = te.prtimesheetid
-       AND   ts.prstatus <> 5 -- Exclude adjusted timesheets
-LEFT   OUTER JOIN CMN_LOOKUPS_V v2
-             ON   v2.lookup_enum = ts.prstatus
-             AND  v2.lookup_type = 'TIMESHEET_STATUS'
-             AND  v2.language_code = @WHERE:PARAM:LANGUAGE@  
-INNER  JOIN  prtimeperiod tp
-       ON    tp.prid =  ts.prtimeperiodid     
-LEFT   OUTER JOIN (SELECT te.prid entry_id, MAX(tn.prid) note_id
-                   FROM   PRTIMEENTRY te
-                   INNER  JOIN PRNOTE tn
-                          ON   te.prid = tn.prrecordid
-                          AND  tn.prtablename = 'PRTimeEntry'
-                   GROUP  BY te.prid) note
-             ON   note.entry_id= te.prid
-LEFT   OUTER JOIN prj_obs_associations assoc
-             ON   assoc.record_id = inv.id
-             AND  assoc.table_name = 'SRM_PROJECTS'
-             AND  (( @WHERE:PARAM:USER_DEF:INTEGER:OBS@ IS NULL AND 1=2 ) OR ( @WHERE:PARAM:USER_DEF:INTEGER:OBS@ IS NOT NULL ))
-LEFT   OUTER JOIN prj_obs_units_flat flat
-             ON   flat.unit_id = assoc.unit_id		
-             AND  (( flat.branch_unit_id IS NULL ) OR (@WHERE:PARAM:USER_DEF:INTEGER:flat.branch_unit_id:OBS@ ))
+			SELECT
+				CMN_CAPTIONS_NLS.NAME,
+				BPM_DEF_PROCESSES.*,
+				BPM_DEF_PROCESS_VERSIONS.*
+			FROM BPM_DEF_PROCESSES
+			JOIN BPM_DEF_PROCESS_VERSIONS 
+				ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+			JOIN CMN_CAPTIONS_NLS
+				ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+					AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+					AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+			WHERE 1=1 
+				AND BPM_DEF_PROCESSES.is_hidden = 0
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="PROCESS_DEFINITIONS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q2 PROCESS EXECUTIONS --
+			-- PE.2, PE.3, PE.4, PE.5, PE.6, PE.7, PE.8 --
 
-WHERE  (   ( @WHERE:PARAM:USER_DEF:INTEGER:p_includeOther@ = 1 )
-        OR ( @WHERE:PARAM:USER_DEF:INTEGER:p_includeOther@ <> 1 AND  inv.odf_object_code = 'project' ) 
-        OR ( @WHERE:PARAM:USER_DEF:INTEGER:p_includeOther@ IS NULL ) )
-AND    @WHERE:SECURITY:INV:inv.id@
-AND    @FILTER@
-GROUP  BY te.prid, inv.id, inv.code, inv.name, inv.odf_object_code, inv.manager_id, manager.full_name, t.prid, t.prexternalid, t.prname, t.prwbssequence, 
-          a.prid, r.id, r.full_name, r.person_type, v.name, ts.prid, ts.prstatus, v2.name, ts.prisadjustment, tp.prid, tp.prstart, tp.prfinish, note.note_id
-		  </textarea>
+			SELECT 
+				CMN_CAPTIONS_NLS.NAME,
+				BPM_DEF_PROCESSES.*,
+				BPM_DEF_PROCESS_VERSIONS.*,
+				BPM_RUN_PROCESSES.*
+			FROM BPM_DEF_PROCESSES
+			JOIN BPM_DEF_PROCESS_VERSIONS 
+				ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+			JOIN BPM_RUN_PROCESSES on BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+			JOIN CMN_CAPTIONS_NLS
+				ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+				AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+				AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="PROCESS_EXECUTIONS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[		
+			-- Q3 SCHEDULED JOBS --
+			-- HK.1, HK.2, HK.3, HK.5, HK.6, HK.7, HK.8, J.1, J.2, J.3, J.4 --
+
+			SELECT 
+				c.name job_type
+				,j.*
+				,attr.column_name parameter_code
+				,b.attribute_value	
+				,n.principal_type notif_type
+				,n.principal_id notif_id
+			FROM CMN_SCH_JOB_DEFINITIONS jd
+			JOIN cmn_sch_jobs j ON j.JOB_DEFINITION_ID = jd.id
+			LEFT JOIN clb_notification_assocs n on n.instance_id = j.id
+			LEFT JOIN cmn_captions_nls c ON c.pk_id = jd.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
+			LEFT JOIN cmn_attribute_value_sets a ON a.business_object_instance_id = j.id
+			LEFT JOIN cmn_attribute_values b ON b.attribute_set_id = a.id	
+			LEFT JOIN cmn_attributes attr ON b.attribute_id = attr.id
+			LEFT JOIN cmn_business_objects d ON   a.business_object_id = d.id
+				AND d.table_name = 'CMN_SCH_JOB_DEFINITIONS'
+				AND d.pk_id = jd.id	
+			WHERE 1=1
+				AND j.status_code = 'SCHEDULED'
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="SCHEDULED_JOBS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q4.1 TIME SLICE JOB RUNS --
+			-- J.1 --
+
+			SELECT
+				c.name job_def_type
+				,j.id JOB_ID
+				,j.JOB_DEFINITION_ID
+				,j.name JOB_NAME
+				,j.START_DATE job_start_date
+				,j.END_DATE job_end_date
+				,j.schedule_date job_schedule_date
+				,j.MINUTES
+				,j.HOURS
+				,j.MONTHS
+				,j.DAYS_OF_MONTH
+				,j.DAYS_OF_WEEK
+				,j.PRIORITY
+				,j.STATUS_CODE JOB_STATUS_CODE
+				,j.IS_VISIBLE
+				,j.RECURRENCE_TYPE
+				,j.OUTPUT_PATH JOB_OUTPUT_PATH
+				,j.CREATED_DATE
+				,j.CREATED_BY
+				,j.LAST_UPDATED_DATE
+				,j.LAST_UPDATED_BY
+				,j.OUTPUT_FORMAT
+				,jr.id job_run_id
+				,jr.TOTAL_EXECUTION_TIME
+				,jr.PERCENT_COMPLETE
+				,jr.STATUS_CODE JOB_RUN_STATUS_CODE
+				,jr.user_id
+				,jr.SCHEDULER_ID
+				,jr.OUTPUT_PATH JOB_RUN_OUTPUT_PATH
+				,jr.JOB_HOSTNAME
+			FROM CMN_SCH_JOB_RUNS jr 
+			JOIN CMN_SCH_JOBS j ON jr.job_id = j.id
+			JOIN CMN_SCH_JOB_DEFINITIONS def ON j.job_definition_id = def.id
+			JOIN cmn_captions_nls c ON c.pk_id = def.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
+			WHERE lower(c.name) LIKE '%time%slic%'		
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="TIME_SLICE_JOB_RUNS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q4.2 LONG RUNNING JOBS --
+			-- J.5 --
+
+			SELECT
+				c.name job_def_type
+				,j.id JOB_ID
+				,j.JOB_DEFINITION_ID
+				,j.name JOB_NAME
+				,j.START_DATE job_start_date
+				,j.END_DATE job_end_date
+				,j.schedule_date job_schedule_date
+				,j.MINUTES
+				,j.HOURS
+				,j.MONTHS
+				,j.DAYS_OF_MONTH
+				,j.DAYS_OF_WEEK
+				,j.PRIORITY
+				,j.STATUS_CODE JOB_STATUS_CODE
+				,j.IS_VISIBLE
+				,j.RECURRENCE_TYPE
+				,j.OUTPUT_PATH JOB_OUTPUT_PATH
+				,j.CREATED_DATE
+				,j.CREATED_BY
+				,j.LAST_UPDATED_DATE
+				,j.LAST_UPDATED_BY
+				,j.OUTPUT_FORMAT
+				,jr.id job_run_id
+				,jr.start_date job_run_start_date
+				,jr.end_date job_run_end_date
+				,jr.TOTAL_EXECUTION_TIME
+				,jr.PERCENT_COMPLETE
+				,jr.STATUS_CODE JOB_RUN_STATUS_CODE
+				,jr.user_id
+				,jr.SCHEDULER_ID
+				,jr.OUTPUT_PATH JOB_RUN_OUTPUT_PATH
+				,jr.JOB_HOSTNAME
+			FROM CMN_SCH_JOB_RUNS jr 
+			JOIN CMN_SCH_JOBS j ON jr.job_id = j.id
+			JOIN CMN_SCH_JOB_DEFINITIONS def ON j.job_definition_id = def.id
+			JOIN cmn_captions_nls c ON c.pk_id = def.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
+			WHERE (jr.TOTAL_EXECUTION_TIME/60000) >= 20	
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="LONG_JOB_RUNS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q5 INSTANCE RIGHTS BY GROUP --
+			-- HK.9 --
+
+			SELECT name--,object_code--,group_code
+				,count(object_instance_id) obj_count
+			FROM (        
+				select DISTINCT c.name
+					,so.object_code 
+					,op.object_instance_id--, g.group_code
+				from CMN_SEC_ASSGND_OBJ_PERM op
+				JOIN cmn_sec_groups g on g.id = op.right_id 
+				JOIN cmn_sec_groups g2 ON op.PRINCIPAL_ID = g2.id                
+				JOIN CMN_CAPTIONS_NLS c ON c.pk_id = g2.id AND c.LANGUAGE_CODE = 'en' AND c.TABLE_name = 'CMN_SEC_GROUPS'
+				JOIN CMN_SEC_OBJECTS so ON so.ID = op.OBJECT_ID			
+				WHERE op.PRINCIPAL_TYPE = 'GROUP'
+				--AND g.group_code = 'PortletViewInstanceRight'	
+				--AND c.name = 'Basic group for user access'
+			 )
+			GROUP BY name--,object_code--, group_code
+			ORDER BY count(object_instance_id) DESC
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="INSTANCE_RIGHTS_BY_GROUP"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q6 INSTANCE RIGHTS BY USER --
+			-- HK.9 --
+
+			SELECT name--,object_code,group_code
+			,count(object_instance_id) obj_count
+			FROM (        
+				select DISTINCT u.user_name name
+					,so.object_code 
+					,op.object_instance_id--, g.group_code
+				from CMN_SEC_ASSGND_OBJ_PERM op
+				JOIN cmn_sec_groups g on g.id = op.right_id 
+				JOIN cmn_sec_users u ON op.PRINCIPAL_ID = u.id                	
+				JOIN CMN_SEC_OBJECTS so ON so.ID = op.OBJECT_ID			
+				WHERE op.PRINCIPAL_TYPE = 'USER'
+				--AND g.group_code = 'PortletViewInstanceRight'	
+				--AND c.name = 'Basic group for user access'
+			 )
+			GROUP BY name--, object_code, group_code
+			ORDER BY count(object_instance_id) DESC
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="INSTANCE_RIGHTS_BY_USER"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q7 TIME REPORTING PERIODS --
+			-- HK.10 --
+
+			SELECT * FROM PRTIMEPERIOD
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="TIME_REPORTING_PERIODS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q8 FISCAL TIME PERIODS -- 
+			-- HK.11 --
+
+			SELECT * FROM BIZ_COM_PERIODS
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="FISCAL_TIME_PERIODS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q9 USERS / RESOURCES --
+			-- HK.12, HK.13 --
+
+			SELECT
+			 u.id user_id, DECODE(u.user_status_id,200,'ACTIVE',201,'INACTIVE',202,'LOCK') USER_STATUS, u.last_logged_in_date, u.created_date, 
+			 r.id res_id, DECODE(r.IS_ACTIVE,1,'ACTIVE','INACTIVE') RES_STATUS 
+			 FROM cmn_sec_users u
+			 LEFT JOIN srm_resources r
+				  LEFT JOIN prj_resources prjr ON prjr.prisrole = 0 AND prjr.prid = r.id
+				  ON r.user_id = u.id
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="USERS_AND_RESOURCES"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[		  
+			-- Q10 INVESTMENTS --
+			-- HK.14 --
+
+			SELECT i.id inv_id, i.name inv_name, i.code inv_code, i.is_active, c.name object_name, i.odf_object_code object_code 
+			, count(1) OVER (PARTITION BY i.odf_object_code) inv_count
+			FROM inv_investments i
+			JOIN odf_objects o ON o.code = i.odf_object_code
+			JOIN CMN_CAPTIONS_NLS c ON c.pk_id = o.id AND c.table_name = 'ODF_OBJECTS' AND c.LANGUAGE_CODE ='en'
+			ORDER BY inv_count desc, inv_id ASC
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="INVESTMENTS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q11 TIME SLICES --
+			-- ENV.2, ENV.3 --
+
+			SELECT  sr.id as sliceid, sr.request_name  slicename, sr.frequency,
+					sr.from_date as fromdate, sr.to_date todate, sr.period periodtype, sr.num_periods numperiods,
+					sr.field, sr.expiration_date as expirydate, 
+					sr.request_completed_date as timelastrun, sr.is_system,
+					period.name  period_name, item.name  item_name, 
+					frequency.name  frequency_name,
+					NVL( attr.request_name, item.lookup_code) attr_code, sr.is_dwh_request
+			FROM    prj_blb_slicerequests sr, cmn_lookups_v period, 
+					cmn_lookups_v item left outer join prj_blb_slicerequests attr on  '' || attr.id  = item.lookup_code,
+					cmn_lookups_v frequency 
+			WHERE   sr.is_synchronous = 0
+				AND     item.lookup_enum = sr.field
+				AND     period.lookup_enum = sr.period
+				AND     frequency.lookup_enum = sr.frequency
+				AND     sr.is_template = 0
+				AND     item.language_code = 'en'
+				AND     period.language_code = 'en'
+				AND     frequency.language_code = 'en'
+				AND     period.lookup_type = 'BLB_SLICE_PERIOD'
+				AND     frequency.lookup_type = 'BLB_SLICE_PERIOD'
+				AND     item.lookup_type = 'BLB_SLICE_ITEM'  
+			ORDER BY slicename ASC
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="TIME_SLICES"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q12 INVALID TRANSACTIONS --
+			-- ENV.4 --
+
+			SELECT
+				I.TRANSDATE TRANSACTION_DATE
+				, I.PROJECT_CODE Project_Code       
+				, R.ID RES_ID
+				, I.QUANTITY Effort_Hours
+				, I.CHARGE_CODE Charge_code
+				, I.INPUT_TYPE Type_code   
+				, I.transclass TRANS_CLASS
+				, E.DESCRIPTION Error
+			FROM IMP_TRANSACTIONIMPORT I
+			JOIN SRM_RESOURCES R ON I.RESOURCE_CODE = R.UNIQUE_NAME
+			JOIN IMP_TRANSACTIONIMPORTERRORS E ON I.ERRORCODE = E.ERRORCODE
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="INVALID_TRANSACTIONS"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+			-- Q13 OBJECT AUDIT --
+			-- HK.4 --
+
+			SELECT id, code, is_custom, is_audit_delete,is_audit_update,is_audit_insert,purge_audit_days_old
+			FROM odf_objects
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="OBJECT_AUDIT"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <!-- *************************** -->
+      <!-- //END: HEALTH CHECK QUERIES -->
+      <!-- *************************** -->
+      <!-- WRITE THE FILE -->
+      <core:catch var="fileCatch">
+        <!-- GET DB CONNECTIONS -->
+        <core:invoke method="getConnection" on="${clarityDB}" var="dbConn"/>
+        <!-- LOOP THROUGH HEALTH CHECK QUERIES -->
+        <core:forEach items="${sql_hash.keySet()}" var="sql">
+          <gel:log>Processing File: ${sql}.csv</gel:log>
+          <!-- SET THE FILE NAME -->
+          <core:set value="${sql}.csv" var="fileName"/>
+          <!-- SET UP THE CSV FILE FOR WRITING-->
+          <core:new className="java.io.FileWriter" escapeText="false" var="fileWriter">
+            <core:arg type="java.lang.String" value="${filePath}/${fileName}"/>
+            <core:arg type="java.lang.Boolean" value="false"/>
+            <!-- APPEND = FALSE -->
+          </core:new>
+          <core:new className="java.io.PrintWriter" var="OutputFile">
+            <core:arg type="java.io.FileWriter" value="${fileWriter}"/>
+          </core:new>
+          <!-- 
+						<gel:log>key: ${sql}</gel:log>
+						<gel:log>value: ${sql_hash.get(sql)}</gel:log> 
+					-->
+          <!-- QUERY THE TABLE DATA -->
+          <core:catch var="selectCatch">
+            <!-- PREPARE AND EXECUTE FILE QUERY -->
+            <core:invoke method="prepareStatement" on="${dbConn}" var="pSQLQuery">
+              <core:arg type="java.lang.String" value="${sql_hash.get(sql)}"/>
+            </core:invoke>
+            <!-- EXECUTE QUERY -->
+            <core:set value="${pSQLQuery.executeQuery()}" var="SQLQueryRS"/>
+          </core:catch>
+          <core:if test="${!empty(selectCatch)}">
+            <gel:log>SQL Select Exception: ${selectCatch}</gel:log>
+            <core:break/>
+          </core:if>
+          <!-- CREATE ARRAY FOR HEADER -->
+          <core:new className="java.util.ArrayList" var="csv_header"/>
+          <!-- ADD COLUMN NAMES TO HEADER HASHSET -->
+          <core:forEach begin="1" end="${SQLQueryRS.getMetaData().getColumnCount()}" step="1" var="i">
+            <core:invoke method="add" on="${csv_header}">
+              <core:arg value="${SQLQueryRS.getMetaData().getColumnName(i)}"/>
+            </core:invoke>
+            <!-- <gel:log>Column Name: ${SQLQueryRS.getMetaData().getColumnName(i)} |  Column Type: ${SQLQueryRS.getMetaData().getColumnTypeName(i)}</gel:log> -->
+          </core:forEach>
+          <core:if test="${debug == 1}">
+            <gel:log>HEADER: ${csv_header}</gel:log>
+          </core:if>
+          <!-- WRITE THE CSV HEADER -->
+          <core:invokeStatic className="org.apache.commons.lang.StringUtils" method="join" var="row_header">
+            <core:arg value="${csv_header.toArray()}"/>
+            <core:arg value="|"/>
+          </core:invokeStatic>
+          <core:invoke method="println" on="${OutputFile}">
+            <core:arg value="${row_header}"/>
+          </core:invoke>
+          <!-- MOVE THROUGH DATASET ROWS -->
+          <core:while test="${SQLQueryRS.next()}">
+            <!-- CREATE ARRAY FOR DATA -->
+            <core:new className="java.util.ArrayList" var="csv_data"/>
+            <!-- ADD DATA TO THE CSV DATA HASHSET -->
+            <core:forEach items="${csv_header}" var="column">
+              <core:invoke method="add" on="${csv_data}">
+                <core:arg value="${SQLQueryRS.getObject(column).toString()}"/>
+              </core:invoke>
+            </core:forEach>
+            <core:if test="${debug == 1}">
+              <gel:log>ROW: ${csv_data}</gel:log>
+            </core:if>
+            <!-- WRITE THE CSV DATA -->
+            <core:invokeStatic className="org.apache.commons.lang.StringUtils" method="join" var="row_csv">
+              <core:arg value="${csv_data.toArray()}"/>
+              <core:arg value="|"/>
+            </core:invokeStatic>
+            <core:invoke method="println" on="${OutputFile}">
+              <core:arg value="${row_csv}"/>
+            </core:invoke>
+          </core:while>
+          <!--CLOSE PREPARED STATEMENT AND RESULTSET -->
+          <core:invoke method="close" on="${pSQLQuery}"/>
+          <core:invoke method="close" on="${SQLQueryRS}"/>
+          <!-- CLOSE THE FILE -->
+          <core:invoke method="close" on="${OutputFile}"/>
+        </core:forEach>
+        <!-- //END: LOOP THROUGH HEALTH CHECK QUERIES -->
+        <!-- CLOSE DATABASE OBJECTS -->
+        <core:if test="${dbConn != null}">
+          <core:invoke method="close" on="${dbConn}"/>
+        </core:if>
+      </core:catch>
+      <!-- //END: WRITE THE FILE -->
+      <core:if test="${!empty(fileCatch)}">
+        <gel:log level="ERROR">File Write Exception: ${fileCatch}</gel:log>
+      </core:if>
+    </core:catch>
+    <!-- // END: CATCH ALL -->
+    <!-- LOG THE CATCH-ALL EXCEPTION -->
+    <core:if test="${!empty(gException)}">
+      <core:if test="${breakError == 0}">
+        <gel:log level="ERROR">There was an exception: ${gException.getCause()}. Exception Cause: ${gException.getCause().getCause()} </gel:log>
+        <core:set value="1" var="isError"/>
+        <core:break/>
+      </core:if>
+    </core:if>
+  </core:forEach>
+  <!-- // END: FOREACH LOOP FOR EXCEPTION HANDLING -->
+  <!-- ERROR ENCOUNTERED -->
+  <core:if test="${isError != 0}">
+    <gel:log level="ERROR">Process error.  View errors above for additional detail.</gel:log>
+  </core:if>
+  <!-- GET ELAPSED RUN TIME OF THE PROCESS -->
+  <core:invokeStatic className="java.lang.System" method="currentTimeMillis" var="processFinishTime"/>
+  <gel:log level="INFO">Total Elapsed Time: ${processFinishTime - processStartTime}(ms)</gel:log>
+</gel:script>
+	  </textarea>
 
 	
 	
