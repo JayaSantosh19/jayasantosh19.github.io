@@ -403,14 +403,14 @@
     </div>
 
 	<textarea> 
-		<gel:script xmlns:core="jelly:core" xmlns:file="jelly:com.niku.union.gel.FileTagLibrary" xmlns:gel="jelly:com.niku.union.gel.GELTagLibrary"
+<gel:script xmlns:core="jelly:core" xmlns:file="jelly:com.niku.union.gel.FileTagLibrary" xmlns:gel="jelly:com.niku.union.gel.GELTagLibrary"
   xmlns:sql="jelly:sql" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <!--
 	Rego Consulting
-	Script: Clarity Health Checks
+	Script: Clarity Health Check Summaries
 	Revision: V1.0
 	
-	Raw/Detailed Health Check exports
+	Summary Health Check exports
 	
 	Version Log:
 	
@@ -432,366 +432,696 @@
       <core:invokeStatic className="java.lang.System" method="currentTimeMillis" var="processStartTime"/>
       <!-- CONNECT TO CLARITY DATABASE -->
       <gel:setDataSource dbId="niku" var="clarityDB"/>
-      <!-- ***************************** -->
-      <!-- //START: HEALTH CHECK QUERIES -->
-      <!-- ***************************** -->
-      <!-- INITIALIZE THE ARRAY -->
-      <!-- <core:new className="java.util.ArrayList" var="sql_hash" /> -->
+      <!-- ************************************* -->
+      <!-- //START: PREPARE HEALTH CHECK QUERIES -->
+      <!-- ************************************* -->
+      <!-- CREATE THE HASHMAP -->
       <core:new className="java.util.LinkedHashMap" var="sql_hash"/>
-      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[
-			-- Q1 - PROCESS DEFINITIONS --
-			-- PE1.1 --
-
-			SELECT
-				CMN_CAPTIONS_NLS.NAME,
-				BPM_DEF_PROCESSES.*,
-				BPM_DEF_PROCESS_VERSIONS.*
-			FROM BPM_DEF_PROCESSES
-			JOIN BPM_DEF_PROCESS_VERSIONS 
-				ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
-			JOIN CMN_CAPTIONS_NLS
-				ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+      <!-- PROCESS SUMMARIES -->
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+				--NUMBER OF ACTIVE PROCESSES
+				--PE.1
+				SELECT
+					   'PE.1' AS HC_CODE
+					   ,'Active Processes' As HEALTH_CHECK
+					   ,Count(distinct BPM_DEF_PROCESSES.PROCESS_CODE) as Total
+					   ,MIN(BPM_DEF_PROCESS_VERSIONS.CREATED_DATE) as oldest_date
+				   FROM 
+				BPM_DEF_PROCESSES
+				JOIN BPM_DEF_PROCESS_VERSIONS 
+					ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+					AND BPM_DEF_PROCESS_VERSIONS.USER_STATUS_CODE = 'BPM_PUS_ACTIVE'
+				JOIN SRM_RESOURCES R on R.USER_ID = BPM_DEF_PROCESSES.created_by
+				LEFT JOIN (
+				  select r.id, r.full_name, r.user_id from srm_resources r JOIN BPM_DEF_PROCESSES dp on dp.created_by = r.user_id
+				) x on x.user_id = BPM_DEF_PROCESSES.created_by
+				WHERE BPM_DEF_PROCESSES.is_hidden = 0
+					and BPM_DEF_PROCESSES.source = 'customer'
+					and BPM_DEF_PROCESSES.created_by <> 1
+				
+				UNION ALL
+				
+				--NUMBER OF PROCESS INSTANCES IN RUNNING STATE (SPECIFY OLDEST DATE)
+				--PE.6
+				SELECT 
+					'PE.6' AS HC_CODE
+					,'Number of Process Instances in Running State' as HEALTH_CHECK
+					,count(BPM_RUN_PROCESSES.STATUS_CODE) as total
+					,MIN(BPM_RUN_PROCESSES.START_DATE) as oldest_date
+				FROM BPM_DEF_PROCESSES
+				JOIN BPM_DEF_PROCESS_VERSIONS 
+					ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+				JOIN BPM_RUN_PROCESSES on BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+					AND BPM_RUN_PROCESSES.STATUS_CODE = 'BPM_PIS_RUNNING'
+				JOIN CMN_CAPTIONS_NLS
+					ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
 					AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
 					AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
-			WHERE 1=1 
-				AND BPM_DEF_PROCESSES.is_hidden = 0
+
+				UNION ALL
+
+				--NUMBER OF PROCESS INSTANCES IN COMPLETED STATE (SPECIFY OLDEST DATE)
+				--PE.2
+				select
+					'PE.2' AS HC_CODE
+					,'Number of Process Instances in Completed State' as HEALTH_CHECK
+					,count(BPM_RUN_PROCESSES.STATUS_CODE) as total
+					,MIN(BPM_RUN_PROCESSES.START_DATE) as oldest_date
+				FROM BPM_DEF_PROCESSES
+				JOIN BPM_DEF_PROCESS_VERSIONS 
+					ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+				JOIN BPM_RUN_PROCESSES on BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+					AND BPM_RUN_PROCESSES.STATUS_CODE = 'BPM_PIS_DONE'
+				JOIN CMN_CAPTIONS_NLS
+					ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+					AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+					AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+
+				UNION ALL
+
+				--NUMBER OF PROCESS INSTANCES IN ERROR STATE (SPECIFY OLDEST DATE)
+				select 
+					'PE.3' AS HC_CODE
+					,'Number of Process Instances in Error State' as HEALTH_CHECK
+					,count(BPM_RUN_PROCESSES.STATUS_CODE) as total
+					,MIN(BPM_RUN_PROCESSES.START_DATE) as oldest_date
+				FROM BPM_DEF_PROCESSES
+				JOIN BPM_DEF_PROCESS_VERSIONS 
+					ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+				JOIN BPM_RUN_PROCESSES on BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+					AND BPM_RUN_PROCESSES.STATUS_CODE = 'BPM_PIS_ERROR'
+				JOIN CMN_CAPTIONS_NLS
+					ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+					AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+					AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="PROCESS_DEFINITIONS"/>
+        <core:arg value="-- PE.1,2,3,6: PROCESS SUMMARIES --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- PE.4: COMMON FAILING PROCESSES, 95% SUCCESS RATE OR LESS (SPECIFY PROCESS NAMES) -->
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[			
+				SELECT 'PE.4' AS HC_CODE, 'COMMON FAILING PROCESSES, 95% SUCCESS RATE OR LESS' HEALTH_CHECK, NAME, PROCESS_CODE, ERROR, DONE, TOTAL
+					,DECODE(TOTAL,0,0,ROUND(ERROR/TOTAL*100,2)) FAIL_RATE
+					,DECODE(TOTAL,0,0,ROUND(DONE/TOTAL*100,2)) SUCCESS_RATE
+				FROM (
+					select 
+						CMN_CAPTIONS_NLS.NAME
+						,BPM_DEF_PROCESSES.PROCESS_CODE
+						,BPM_RUN_PROCESSES.STATUS_CODE		
+						,COUNT(1) OVER (PARTITION BY BPM_DEF_PROCESSES.PROCESS_CODE) TOTAL
+					FROM BPM_DEF_PROCESSES
+					JOIN BPM_DEF_PROCESS_VERSIONS ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+					JOIN BPM_RUN_PROCESSES ON BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+						AND BPM_RUN_PROCESSES.STATUS_CODE IN ('BPM_PIS_ERROR', 'BPM_PIS_DONE')
+					JOIN CMN_CAPTIONS_NLS ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+						AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+						AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+				)
+				PIVOT (
+					count(*) FOR status_code IN ('BPM_PIS_ERROR' error, 'BPM_PIS_DONE' done)
+				)
+				WHERE DECODE(TOTAL,0,0,ROUND(DONE/TOTAL*100,2)) <= 95
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="-- PE.4: COMMON FAILING PROCESSES, 95% SUCCESS RATE OR LESS (SPECIFY PROCESS NAMES) --"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <!-- PE.5: LONG RUNNING PROCESSES, 5 MINUTES OR LONGER ON AVERAGE (SPECIFY PROCESS NAMES) -->
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[			
+				SELECT 'PE.5' HC_CODE, 'LONG RUNNING PROCESSES, 5 MINUTES OR LONGER ON AVERAGE' HEALTH_CHECK, NAME, PROCESS_CODE, STATUS_CODE, TOTAL, ROUND(1440*AVG(PROC_DURATION),2) AVG_DURATION_MINUTES
+				FROM (
+					select 
+						CMN_CAPTIONS_NLS.NAME, BPM_DEF_PROCESSES.PROCESS_CODE, BPM_RUN_PROCESSES.STATUS_CODE
+						,BPM_RUN_PROCESSES.END_DATE - BPM_RUN_PROCESSES.START_DATE PROC_DURATION  	
+						,COUNT(1) OVER (PARTITION BY BPM_DEF_PROCESSES.PROCESS_CODE) TOTAL			
+					FROM BPM_DEF_PROCESSES
+					JOIN BPM_DEF_PROCESS_VERSIONS ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+					JOIN BPM_RUN_PROCESSES ON BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+						AND BPM_RUN_PROCESSES.STATUS_CODE = 'BPM_PIS_DONE'		
+					JOIN CMN_CAPTIONS_NLS ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+						AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+					AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+				)
+				GROUP BY NAME, PROCESS_CODE, STATUS_CODE, TOTAL
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="-- PE.5: LONG RUNNING PROCESSES, 5 MINUTES OR LONGER ON AVERAGE (SPECIFY PROCESS NAMES) --"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <!-- PE.7: PROCESS ENGINE THROUGHPUT - AVERAGE RUNS PER DAY  -->
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[			
+				select 
+					'PE.7' as HC_CODE
+					,'Process Engine Throughput - Average Runs Per Day' HEALTH_CHECK
+					,min(run_day) start_date
+					,max(run_day) end_date
+					,avg(process_count) avg_runs_per_day
+					,max(process_count) most_runs_in_a_day
+					,min(process_count) fewest_runs_in_a_day
+				from (
+					SELECT  name process_name, trunc(run_date) run_day, count(1) process_count
+					FROM ( 
+						SELECT 
+							CMN_CAPTIONS_NLS.NAME,
+							BPM_DEF_PROCESSES.*,
+							BPM_DEF_PROCESS_VERSIONS.*,
+							BPM_RUN_PROCESSES.*,
+							BPM_RUN_PROCESSES.created_date run_date
+						FROM BPM_DEF_PROCESSES
+						JOIN BPM_DEF_PROCESS_VERSIONS 
+							ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+						JOIN BPM_RUN_PROCESSES 
+							on BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+						JOIN CMN_CAPTIONS_NLS
+							ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+							AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+							AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+					)
+					WHERE 1=1
+					GROUP BY name, trunc(run_date)
+				)				
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="-- PE.7: PROCESS ENGINE THROUGHPUT - AVERAGE RUNS PER DAY --"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <!-- PE.8: PROCESS ENGINE THROUGHPUT - MOST COMMON PROCESSES (TOP 10 BY VOLUME)  -->
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[			
+				select 'PE.8' HC_CODE, 'PROCESS ENGINE THROUGHPUT - TOP 10 PROCESSES' HEALTH_CHECK, row_number() over (order by process_count desc) rank, process_name, process_count
+				from (
+					SELECT  name process_name, count(1) process_count
+					FROM ( 
+						SELECT 
+							CMN_CAPTIONS_NLS.NAME,
+							BPM_DEF_PROCESSES.*,
+							BPM_DEF_PROCESS_VERSIONS.*,
+							BPM_RUN_PROCESSES.*
+						FROM BPM_DEF_PROCESSES
+						JOIN BPM_DEF_PROCESS_VERSIONS 
+							ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
+						JOIN BPM_RUN_PROCESSES 
+							on BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
+						JOIN CMN_CAPTIONS_NLS
+							ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
+							AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
+							AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+					)
+					WHERE 1=1
+					GROUP BY name
+					ORDER BY process_count desc
+				)
+				WHERE rownum <= 10
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="-- PE.8: PROCESS ENGINE THROUGHPUT - MOST COMMON PROCESSES (TOP 10 BY VOLUME) --"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <!-- HK.1-3,5-8, J.1-4: CONFIRM SCHEDULED JOBS  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q2 PROCESS EXECUTIONS --
-			-- PE.2, PE.3, PE.4, PE.5, PE.6, PE.7, PE.8 --
-
-			SELECT 
-				CMN_CAPTIONS_NLS.NAME,
-				BPM_DEF_PROCESSES.*,
-				BPM_DEF_PROCESS_VERSIONS.*,
-				BPM_RUN_PROCESSES.*
-			FROM BPM_DEF_PROCESSES
-			JOIN BPM_DEF_PROCESS_VERSIONS 
-				ON BPM_DEF_PROCESS_VERSIONS.PROCESS_ID = BPM_DEF_PROCESSES.ID
-			JOIN BPM_RUN_PROCESSES on BPM_RUN_PROCESSES.PROCESS_VERSION_ID = BPM_DEF_PROCESS_VERSIONS.ID
-			JOIN CMN_CAPTIONS_NLS
-				ON CMN_CAPTIONS_NLS.TABLE_NAME='BPM_DEF_PROCESSES' 
-				AND CMN_CAPTIONS_NLS.LANGUAGE_CODE ='en' 
-				AND CMN_CAPTIONS_NLS.PK_ID = BPM_DEF_PROCESSES.ID
+				WITH HEALTH_CHECKS AS (
+					SELECT 'HK.1' HC_CODE, 'Clean User Session' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'HK.2' HC_CODE, 'Delete Process Instance' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'HK.3' HC_CODE, 'Purge Audit Trail' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'HK.5' HC_CODE, 'Purge Notifications' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'HK.6' HC_CODE, 'Purge Report Output' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'HK.7' HC_CODE, 'Remove Job Logs and Report Library entries' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'HK.8' HC_CODE, 'Purge Action Items' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.1' HC_CODE, 'Time Slicing' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.1' HC_CODE, 'Time Slicing Sync' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.2' HC_CODE, 'Post Timesheets'JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.2' HC_CODE, 'Post Actuals to Investment' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.2' HC_CODE, 'Post Transactions to Financial' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.3' HC_CODE, 'Create and Update Jaspersoft Users' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.3' HC_CODE, 'Synchronize Jaspersoft Roles' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.3' HC_CODE, 'Load Data Warehouse' JOB_TYPE FROM DUAL UNION ALL
+					SELECT 'J.3' HC_CODE, 'Load Data Warehouse Access Rights' JOB_TYPE FROM DUAL
+				)
+				SELECT 
+					hc.hc_code, x.JOB_TYPE HEALTH_CHECK, count(JOB_ID) SCHEDULED_JOB_COUNT
+					,JOB_ID, JOB_NAME, job_def_type, START_DATE, SCHEDULE_DATE, STATUS_CODE, RECURRENCE_TYPE, MINUTES, HOURS, MONTHS, DAYS_OF_MONTH, DAYS_OF_WEEK
+				FROM (
+					SELECT DISTINCT
+						JOB_TYPE, ID JOB_ID, NAME JOB_NAME, job_def_type, START_DATE, SCHEDULE_DATE, STATUS_CODE, RECURRENCE_TYPE, MINUTES, HOURS, MONTHS, DAYS_OF_MONTH, DAYS_OF_WEEK
+					FROM (
+						SELECT c.name job_type
+							,j.*
+							,jt.name job_def_type
+							,attr.column_name parameter_code
+							,b.attribute_value	
+							,n.principal_type notif_type
+							,n.principal_id notif_id
+						FROM CMN_SCH_JOB_DEFINITIONS jd
+						LEFT JOIN cmn_sch_jobs j ON j.JOB_DEFINITION_ID = jd.id
+							AND j.status_code = 'SCHEDULED'
+						LEFT JOIN clb_notification_assocs n on n.instance_id = j.id
+						LEFT JOIN cmn_captions_nls c ON c.pk_id = jd.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
+						LEFT JOIN cmn_attribute_value_sets a ON a.business_object_instance_id = j.id
+						LEFT JOIN cmn_attribute_values b ON b.attribute_set_id = a.id	
+						LEFT JOIN cmn_attributes attr ON b.attribute_id = attr.id
+						LEFT JOIN cmn_business_objects d ON   a.business_object_id = d.id
+							AND d.table_name = 'CMN_SCH_JOB_DEFINITIONS'
+							AND d.pk_id = jd.id	
+						LEFT JOIN cmn_lookups_v jt ON jt.id = jd.job_type AND jt.lookup_type = 'SCH_JOB_TYPE' AND jt.language_code = 'en'
+						WHERE 1=1
+							AND C.NAME IN (
+								'Clean User Session'
+								,'Delete Process Instance'
+								,'Purge Audit Trail'
+								,'Purge Notifications'
+								,'Purge Report Output'
+								,'Remove Job Logs and Report Library entries'
+								,'Purge Action Items'
+								,'Time Slicing'
+								,'Time Slicing Sync'
+								,'Post Timesheets'
+								,'Post Actuals to Investment'
+								,'Post Transactions to Financial'
+								,'Create and Update Jaspersoft Users'
+								,'Synchronize Jaspersoft Roles'
+								,'Load Data Warehouse'
+								,'Load Data Warehouse Access Rights'
+							)
+					)
+				) x
+				LEFT JOIN HEALTH_CHECKS hc on lower(hc.JOB_TYPE) = lower(x.job_type)
+				GROUP BY hc.hc_code, x.JOB_TYPE, JOB_ID, JOB_NAME, job_def_type, START_DATE, SCHEDULE_DATE, STATUS_CODE, RECURRENCE_TYPE, MINUTES, HOURS, MONTHS, DAYS_OF_MONTH, DAYS_OF_WEEK
+				ORDER BY hc.HC_CODE, x.job_type
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="PROCESS_EXECUTIONS"/>
+        <core:arg value="-- HK.1,2,3,5,6,7,8 | J.1,2,3,4: CONFIRM SCHEDULED JOBS  --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
-      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[		
-			-- Q3 SCHEDULED JOBS --
-			-- HK.1, HK.2, HK.3, HK.5, HK.6, HK.7, HK.8, J.1, J.2, J.3, J.4 --
-
-			SELECT 
-				c.name job_type
-				,j.*
-				,attr.column_name parameter_code
-				,b.attribute_value	
-				,n.principal_type notif_type
-				,n.principal_id notif_id
-			FROM CMN_SCH_JOB_DEFINITIONS jd
-			JOIN cmn_sch_jobs j ON j.JOB_DEFINITION_ID = jd.id
-			LEFT JOIN clb_notification_assocs n on n.instance_id = j.id
-			LEFT JOIN cmn_captions_nls c ON c.pk_id = jd.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
-			LEFT JOIN cmn_attribute_value_sets a ON a.business_object_instance_id = j.id
-			LEFT JOIN cmn_attribute_values b ON b.attribute_set_id = a.id	
-			LEFT JOIN cmn_attributes attr ON b.attribute_id = attr.id
-			LEFT JOIN cmn_business_objects d ON   a.business_object_id = d.id
-				AND d.table_name = 'CMN_SCH_JOB_DEFINITIONS'
-				AND d.pk_id = jd.id	
-			WHERE 1=1
-				AND j.status_code = 'SCHEDULED'
-			]]></core:set>
-      <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="SCHEDULED_JOBS"/>
-        <core:arg value="${my_sql}"/>
-      </core:invoke>
+      <!-- HK.4: CONFIRM ALL OBJECTS WITH AT LEAST 1 AUDITED FIELD HAVE A RETENTION PERIOD  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q4.1 TIME SLICE JOB RUNS --
-			-- J.1 --
-
-			SELECT
-				c.name job_def_type
-				,j.id JOB_ID
-				,j.JOB_DEFINITION_ID
-				,j.name JOB_NAME
-				,j.START_DATE job_start_date
-				,j.END_DATE job_end_date
-				,j.schedule_date job_schedule_date
-				,j.MINUTES
-				,j.HOURS
-				,j.MONTHS
-				,j.DAYS_OF_MONTH
-				,j.DAYS_OF_WEEK
-				,j.PRIORITY
-				,j.STATUS_CODE JOB_STATUS_CODE
-				,j.IS_VISIBLE
-				,j.RECURRENCE_TYPE
-				,j.OUTPUT_PATH JOB_OUTPUT_PATH
-				,j.CREATED_DATE
-				,j.CREATED_BY
-				,j.LAST_UPDATED_DATE
-				,j.LAST_UPDATED_BY
-				,j.OUTPUT_FORMAT
-				,jr.id job_run_id
-				,jr.TOTAL_EXECUTION_TIME
-				,jr.PERCENT_COMPLETE
-				,jr.STATUS_CODE JOB_RUN_STATUS_CODE
-				,jr.user_id
-				,jr.SCHEDULER_ID
-				,jr.OUTPUT_PATH JOB_RUN_OUTPUT_PATH
-				,jr.JOB_HOSTNAME
-			FROM CMN_SCH_JOB_RUNS jr 
-			JOIN CMN_SCH_JOBS j ON jr.job_id = j.id
-			JOIN CMN_SCH_JOB_DEFINITIONS def ON j.job_definition_id = def.id
-			JOIN cmn_captions_nls c ON c.pk_id = def.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
-			WHERE lower(c.name) LIKE '%time%slic%'		
+				SELECT 'HK.4' HC_CODE, 'CONFRIM AUDITED OBJECTS WITH RETENTION' HEALTH_CHECK, id, code, is_custom, is_audit_delete,is_audit_update,is_audit_insert,purge_audit_days_old
+				FROM odf_objects
+				WHERE (
+					(1 IN (is_audit_delete,is_audit_update,is_audit_insert)) AND
+					(purge_audit_days_old = 0 OR purge_audit_days_old IS NULL)
+				)
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="TIME_SLICE_JOB_RUNS"/>
+        <core:arg value="-- HK.9: CONFIRM SCHEDULED JOBS  --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- HK.9: TOP 10 USERS AND GROUPS WITH INSTANCE RIGHTS  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q4.2 LONG RUNNING JOBS --
-			-- J.5 --
-
-			SELECT
-				c.name job_def_type
-				,j.id JOB_ID
-				,j.JOB_DEFINITION_ID
-				,j.name JOB_NAME
-				,j.START_DATE job_start_date
-				,j.END_DATE job_end_date
-				,j.schedule_date job_schedule_date
-				,j.MINUTES
-				,j.HOURS
-				,j.MONTHS
-				,j.DAYS_OF_MONTH
-				,j.DAYS_OF_WEEK
-				,j.PRIORITY
-				,j.STATUS_CODE JOB_STATUS_CODE
-				,j.IS_VISIBLE
-				,j.RECURRENCE_TYPE
-				,j.OUTPUT_PATH JOB_OUTPUT_PATH
-				,j.CREATED_DATE
-				,j.CREATED_BY
-				,j.LAST_UPDATED_DATE
-				,j.LAST_UPDATED_BY
-				,j.OUTPUT_FORMAT
-				,jr.id job_run_id
-				,jr.start_date job_run_start_date
-				,jr.end_date job_run_end_date
-				,jr.TOTAL_EXECUTION_TIME
-				,jr.PERCENT_COMPLETE
-				,jr.STATUS_CODE JOB_RUN_STATUS_CODE
-				,jr.user_id
-				,jr.SCHEDULER_ID
-				,jr.OUTPUT_PATH JOB_RUN_OUTPUT_PATH
-				,jr.JOB_HOSTNAME
-			FROM CMN_SCH_JOB_RUNS jr 
-			JOIN CMN_SCH_JOBS j ON jr.job_id = j.id
-			JOIN CMN_SCH_JOB_DEFINITIONS def ON j.job_definition_id = def.id
-			JOIN cmn_captions_nls c ON c.pk_id = def.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
-			WHERE (jr.TOTAL_EXECUTION_TIME/60000) >= 20	
+				SELECT 'HK.9' HC_CODE, 'TOP 10 USERS AND GROUPS WITH INSTANCE RIGHTS' HEALTH_CHECK
+						,'GROUP' as ASSIGNED_TO, row_number() over (order by obj_count desc) rank, group_name name, group_id, obj_count
+				FROM (
+					SELECT name group_name, group_id, count(object_instance_id) obj_count
+					FROM (        
+						select DISTINCT c.name, g2.id group_id
+							,so.object_code 
+							,op.object_instance_id
+						from CMN_SEC_ASSGND_OBJ_PERM op
+						JOIN cmn_sec_groups g on g.id = op.right_id 
+						JOIN cmn_sec_groups g2 ON op.PRINCIPAL_ID = g2.id                
+						JOIN CMN_CAPTIONS_NLS c ON c.pk_id = g2.id AND c.LANGUAGE_CODE = 'en' AND c.TABLE_name = 'CMN_SEC_GROUPS'
+						JOIN CMN_SEC_OBJECTS so ON so.ID = op.OBJECT_ID			
+						WHERE op.PRINCIPAL_TYPE = 'GROUP'
+					 )
+					GROUP BY name,group_id--, group_code
+					ORDER BY count(object_instance_id) DESC
+				)
+				WHERE rownum <= 10
+				
+				UNION ALL
+				
+				SELECT 'HK.9' HC_CODE, 'TOP 10 USERS AND GROUPS WITH INSTANCE RIGHTS' HEALTH_CHECK,
+						'USER' as ASSIGNED_TO, row_number() over (order by obj_count desc) rank, user_name name, user_id, obj_count
+				FROM (
+					SELECT name user_name, user_id, count(object_instance_id) obj_count
+					FROM (        
+						select DISTINCT u.user_name name, u.id user_id
+							,so.object_code 
+							,op.object_instance_id
+						from CMN_SEC_ASSGND_OBJ_PERM op
+						JOIN cmn_sec_groups g on g.id = op.right_id 
+						JOIN cmn_sec_users u ON op.PRINCIPAL_ID = u.id                	
+						JOIN CMN_SEC_OBJECTS so ON so.ID = op.OBJECT_ID			
+						WHERE op.PRINCIPAL_TYPE = 'USER'
+					 )
+					GROUP BY name, user_id--, user_name
+					ORDER BY count(object_instance_id) DESC
+				)
+				WHERE rownum <= 10
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="LONG_JOB_RUNS"/>
+        <core:arg value="-- HK.9: TOP 10 USERS AND GROUPS WITH INSTANCE RIGHTS  --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- HK.10: NUMBER OF TIME REPORTING PERIODS  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q5 INSTANCE RIGHTS BY GROUP --
-			-- HK.9 --
-
-			SELECT name--,object_code--,group_code
-				,count(object_instance_id) obj_count
-			FROM (        
-				select DISTINCT c.name
-					,so.object_code 
-					,op.object_instance_id--, g.group_code
-				from CMN_SEC_ASSGND_OBJ_PERM op
-				JOIN cmn_sec_groups g on g.id = op.right_id 
-				JOIN cmn_sec_groups g2 ON op.PRINCIPAL_ID = g2.id                
-				JOIN CMN_CAPTIONS_NLS c ON c.pk_id = g2.id AND c.LANGUAGE_CODE = 'en' AND c.TABLE_name = 'CMN_SEC_GROUPS'
-				JOIN CMN_SEC_OBJECTS so ON so.ID = op.OBJECT_ID			
-				WHERE op.PRINCIPAL_TYPE = 'GROUP'
-				--AND g.group_code = 'PortletViewInstanceRight'	
-				--AND c.name = 'Basic group for user access'
-			 )
-			GROUP BY name--,object_code--, group_code
-			ORDER BY count(object_instance_id) DESC
+				WITH STATUSES AS (
+					SELECT 1 AS ISOPEN, 'OPEN' STATUS  FROM DUAL UNION ALL
+					SELECT 0 AS ISOPEN, 'CLOSED' STATUS FROM DUAL
+				)
+				SELECT 'HK.10' HC_CODE, 'NUMBER OF TIME REPORTING PERIODS' HEALTH_CHECK, S.STATUS STATUS, COUNT(PRISOPEN) STATUS_COUNT 
+				FROM PRTIMEPERIOD
+				RIGHT JOIN STATUSES S ON S.ISOPEN = PRTIMEPERIOD.PRISOPEN
+				GROUP BY S.STATUS
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="INSTANCE_RIGHTS_BY_GROUP"/>
+        <core:arg value="-- HK.10: NUMBER OF TIME REPORTING PERIODS --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- HK.11: FISCAL TIME PERIODS BY TYPE  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q6 INSTANCE RIGHTS BY USER --
-			-- HK.9 --
-
-			SELECT name--,object_code,group_code
-			,count(object_instance_id) obj_count
-			FROM (        
-				select DISTINCT u.user_name name
-					,so.object_code 
-					,op.object_instance_id--, g.group_code
-				from CMN_SEC_ASSGND_OBJ_PERM op
-				JOIN cmn_sec_groups g on g.id = op.right_id 
-				JOIN cmn_sec_users u ON op.PRINCIPAL_ID = u.id                	
-				JOIN CMN_SEC_OBJECTS so ON so.ID = op.OBJECT_ID			
-				WHERE op.PRINCIPAL_TYPE = 'USER'
-				--AND g.group_code = 'PortletViewInstanceRight'	
-				--AND c.name = 'Basic group for user access'
-			 )
-			GROUP BY name--, object_code, group_code
-			ORDER BY count(object_instance_id) DESC
+				SELECT 'HK.11' HC_CODE, 'FISCAL TIME PERIODS BY TYPE' HEALTH_CHECK, PERIOD_TYPE, IS_ACTIVE, COUNT(PERIOD_TYPE) PERIOD_TYPE_COUNT, MIN(START_DATE) MIN_START, MAX(END_DATE) MAX_END
+				FROM BIZ_COM_PERIODS
+				GROUP BY IS_ACTIVE, PERIOD_TYPE
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="INSTANCE_RIGHTS_BY_USER"/>
+        <core:arg value="-- HK.11: FISCAL TIME PERIODS BY TYPE --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- HK.12, HK.13: NUMBER OF ACTIVE/LOCKED/INACTIVE USERS/RESOURCES  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q7 TIME REPORTING PERIODS --
-			-- HK.10 --
-
-			SELECT * FROM PRTIMEPERIOD
+				SELECT HC_CODE, HEALTH_CHECK, RECORD_TYPE, STATUS, COUNT(status) STATUS_COUNT
+				FROM (
+					SELECT
+					 'HK.12' AS HC_CODE, 'NUMBER OF ACTIVE/LOCKED/INACTIVE USERS' HEALTH_CHECK, 'USER' AS RECORD_TYPE, u.id user_id, DECODE(u.user_status_id,200,'ACTIVE',201,'INACTIVE',202,'LOCK') STATUS
+					 FROM cmn_sec_users u
+					 WHERE u.IS_SYSTEM = 0  
+					UNION ALL
+					SELECT
+					'HK.13' AS HC_CODE, 'NUMBER OF ACTIVE/LOCKED/INACTIVE RESOURCES' HEALTH_CHECK, 'RESOURCE' AS RECORD_TYPE, r.id res_id, DECODE(r.IS_ACTIVE,1,'ACTIVE','INACTIVE') STATUS--, prjr.prisrole
+					FROM srm_resources r
+					JOIN CMN_SEC_USERS U ON U.ID = R.USER_ID
+						AND u.IS_SYSTEM = 0
+				)
+				GROUP BY HC_CODE, HEALTH_CHECK, RECORD_TYPE, STATUS
+				ORDER BY HC_CODE ASC
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="TIME_REPORTING_PERIODS"/>
+        <core:arg value="-- HK.12, HK.13: NUMBER OF ACTIVE/LOCKED/INACTIVE USERS/RESOURCES --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- HK.14: NUMBER OF ACTIVE/INACTIVE INVESTMENTS (PER INVESTMENT TYPE)  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q8 FISCAL TIME PERIODS -- 
-			-- HK.11 --
-
-			SELECT * FROM BIZ_COM_PERIODS
+				SELECT 'HK.14' HC_CODE, 'NUMBER OF ACTIVE/INACTIVE INVESTMENTS' HEALTH_CHECK, i.is_active, c.name object_name, i.odf_object_code object_code 
+				, count(odf_object_code) inv_count
+				FROM inv_investments i
+				JOIN odf_objects o ON o.code = i.odf_object_code
+				JOIN CMN_CAPTIONS_NLS c ON c.pk_id = o.id AND c.table_name = 'ODF_OBJECTS' AND c.LANGUAGE_CODE ='en'
+				GROUP BY i.is_active, c.name, i.odf_object_code
+				ORDER BY is_active DESC, inv_count desc, c.name desc
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="FISCAL_TIME_PERIODS"/>
+        <core:arg value="-- HK.14: NUMBER OF ACTIVE/INACTIVE INVESTMENTS (PER INVESTMENT TYPE) --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- J.1: TIME SLICING JOB DURATIONS  -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q9 USERS / RESOURCES --
-			-- HK.12, HK.13 --
-
-			SELECT
-			 u.id user_id, DECODE(u.user_status_id,200,'ACTIVE',201,'INACTIVE',202,'LOCK') USER_STATUS, u.last_logged_in_date, u.created_date, 
-			 r.id res_id, DECODE(r.IS_ACTIVE,1,'ACTIVE','INACTIVE') RES_STATUS 
-			 FROM cmn_sec_users u
-			 LEFT JOIN srm_resources r
-				  LEFT JOIN prj_resources prjr ON prjr.prisrole = 0 AND prjr.prid = r.id
-				  ON r.user_id = u.id
+				SELECT 'J.1' HC_CODE, 'TIME SLICING JOB DURATIONS' HEALTH_CHECK
+					,job_def_type
+					,job_run_status_code
+					,avg(TOTAL_EXECUTION_TIME/60000) avg_exec_time
+				FROM (
+					SELECT
+						c.name job_def_type
+						,j.id JOB_ID
+						,j.JOB_DEFINITION_ID
+						,j.name JOB_NAME
+						,j.START_DATE job_start_date
+						,j.END_DATE job_end_date
+						,j.schedule_date job_schedule_date
+						,j.MINUTES
+						,j.HOURS
+						,j.MONTHS
+						,j.DAYS_OF_MONTH
+						,j.DAYS_OF_WEEK
+						,j.PRIORITY
+						,j.STATUS_CODE JOB_STATUS_CODE
+						,j.IS_VISIBLE
+						,j.RECURRENCE_TYPE
+						,j.OUTPUT_PATH JOB_OUTPUT_PATH
+						,j.CREATED_DATE
+						,j.CREATED_BY
+						,j.LAST_UPDATED_DATE
+						,j.LAST_UPDATED_BY
+						,j.OUTPUT_FORMAT
+						,jr.id job_run_id
+						,jr.TOTAL_EXECUTION_TIME
+						,jr.PERCENT_COMPLETE
+						,jr.STATUS_CODE JOB_RUN_STATUS_CODE
+						,jr.user_id
+						,jr.SCHEDULER_ID
+						,jr.OUTPUT_PATH JOB_RUN_OUTPUT_PATH
+						,jr.JOB_HOSTNAME
+					FROM CMN_SCH_JOB_RUNS jr 
+					JOIN CMN_SCH_JOBS j ON jr.job_id = j.id
+					JOIN CMN_SCH_JOB_DEFINITIONS def ON j.job_definition_id = def.id
+					JOIN cmn_captions_nls c ON c.pk_id = def.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
+					WHERE c.name IN ('Time Slicing','Time Slicing Sync')
+				)
+				GROUP BY JOB_DEF_TYPE,job_run_status_code
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="USERS_AND_RESOURCES"/>
+        <core:arg value="-- J.1: TIME SLICING JOB DURATIONS --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
-      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[		  
-			-- Q10 INVESTMENTS --
-			-- HK.14 --
-
-			SELECT i.id inv_id, i.name inv_name, i.code inv_code, i.is_active, c.name object_name, i.odf_object_code object_code 
-			, count(1) OVER (PARTITION BY i.odf_object_code) inv_count
-			FROM inv_investments i
-			JOIN odf_objects o ON o.code = i.odf_object_code
-			JOIN CMN_CAPTIONS_NLS c ON c.pk_id = o.id AND c.table_name = 'ODF_OBJECTS' AND c.LANGUAGE_CODE ='en'
-			ORDER BY inv_count desc, inv_id ASC
-			]]></core:set>
-      <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="INVESTMENTS"/>
-        <core:arg value="${my_sql}"/>
-      </core:invoke>
+      <!-- J.4: JOB MONITOR GROUP - ENSURE ALL JOBS ARE SHARED AND ENABLED TO NOTIFY ON ERROR AGAINST A SECURITY GROUP -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q11 TIME SLICES --
-			-- ENV.2, ENV.3 --
-
-			SELECT  sr.id as sliceid, sr.request_name  slicename, sr.frequency,
-					sr.from_date as fromdate, sr.to_date todate, sr.period periodtype, sr.num_periods numperiods,
-					sr.field, sr.expiration_date as expirydate, 
-					sr.request_completed_date as timelastrun, sr.is_system,
-					period.name  period_name, item.name  item_name, 
-					frequency.name  frequency_name,
-					NVL( attr.request_name, item.lookup_code) attr_code, sr.is_dwh_request
-			FROM    prj_blb_slicerequests sr, cmn_lookups_v period, 
-					cmn_lookups_v item left outer join prj_blb_slicerequests attr on  '' || attr.id  = item.lookup_code,
-					cmn_lookups_v frequency 
-			WHERE   sr.is_synchronous = 0
-				AND     item.lookup_enum = sr.field
-				AND     period.lookup_enum = sr.period
-				AND     frequency.lookup_enum = sr.frequency
-				AND     sr.is_template = 0
-				AND     item.language_code = 'en'
-				AND     period.language_code = 'en'
-				AND     frequency.language_code = 'en'
-				AND     period.lookup_type = 'BLB_SLICE_PERIOD'
-				AND     frequency.lookup_type = 'BLB_SLICE_PERIOD'
-				AND     item.lookup_type = 'BLB_SLICE_ITEM'  
-			ORDER BY slicename ASC
+				SELECT DISTINCT
+					'J.4' HC_CODE, 'JOB MONITORING' HEALTH_CHECK,
+					 job_type, name, NVL(NOTIF_TYPE,'NO NOTIFICATION GROUP/USER DEFINED') NOTIF_TYPE
+				FROM (
+					SELECT 
+						c.name job_type
+						,j.*
+						,attr.column_name parameter_code
+						,b.attribute_value	
+						,n.principal_type notif_type
+						,n.principal_id notif_id
+					FROM CMN_SCH_JOB_DEFINITIONS jd
+					JOIN cmn_sch_jobs j ON j.JOB_DEFINITION_ID = jd.id
+						AND j.status_code = 'SCHEDULED'
+					LEFT JOIN clb_notification_assocs n on n.instance_id = j.id
+					LEFT JOIN cmn_captions_nls c ON c.pk_id = jd.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
+					LEFT JOIN cmn_attribute_value_sets a ON a.business_object_instance_id = j.id
+					LEFT JOIN cmn_attribute_values b ON b.attribute_set_id = a.id	
+					LEFT JOIN cmn_attributes attr ON b.attribute_id = attr.id
+					LEFT JOIN cmn_business_objects d ON   a.business_object_id = d.id
+						AND d.table_name = 'CMN_SCH_JOB_DEFINITIONS'
+						AND d.pk_id = jd.id	
+					WHERE 1=1
+				)
+				WHERE NOTIF_TYPE IS NULL AND NOTIF_ID IS NULL
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="TIME_SLICES"/>
+        <core:arg value="-- J.4: JOB MONITORING --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- J.5: LONG RUNNING JOBS (20 MINS OR LONGER) -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q12 INVALID TRANSACTIONS --
-			-- ENV.4 --
-
-			SELECT
-				I.TRANSDATE TRANSACTION_DATE
-				, I.PROJECT_CODE Project_Code       
-				, R.ID RES_ID
-				, I.QUANTITY Effort_Hours
-				, I.CHARGE_CODE Charge_code
-				, I.INPUT_TYPE Type_code   
-				, I.transclass TRANS_CLASS
-				, E.DESCRIPTION Error
-			FROM IMP_TRANSACTIONIMPORT I
-			JOIN SRM_RESOURCES R ON I.RESOURCE_CODE = R.UNIQUE_NAME
-			JOIN IMP_TRANSACTIONIMPORTERRORS E ON I.ERRORCODE = E.ERRORCODE
+				SELECT HC_CODE, HEALTH_CHECK, JOB_DEF_TYPE, avg_total_exec_time_mins
+				FROM (
+					SELECT 'J.5' HC_CODE, 'LONG RUNNING JOBS (20 MINS OR LONGER)' HEALTH_CHECK
+						,job_def_type
+						,AVG(TOTAL_EXECUTION_TIME/60000) avg_total_exec_time_mins
+					FROM (
+						SELECT
+							c.name job_def_type
+							,j.id JOB_ID
+							,j.JOB_DEFINITION_ID
+							,j.name JOB_NAME
+							,j.START_DATE job_start_date
+							,j.END_DATE job_end_date
+							,j.schedule_date job_schedule_date
+							,j.MINUTES
+							,j.HOURS
+							,j.MONTHS
+							,j.DAYS_OF_MONTH
+							,j.DAYS_OF_WEEK
+							,j.PRIORITY
+							,j.STATUS_CODE JOB_STATUS_CODE
+							,j.IS_VISIBLE
+							,j.RECURRENCE_TYPE
+							,j.OUTPUT_PATH JOB_OUTPUT_PATH
+							,j.CREATED_DATE
+							,j.CREATED_BY
+							,j.LAST_UPDATED_DATE
+							,j.LAST_UPDATED_BY
+							,j.OUTPUT_FORMAT
+							,jr.id job_run_id
+							,jr.start_date job_run_start_date
+							,jr.end_date job_run_end_date
+							,jr.TOTAL_EXECUTION_TIME
+							,jr.PERCENT_COMPLETE
+							,jr.STATUS_CODE JOB_RUN_STATUS_CODE
+							,jr.user_id
+							,jr.SCHEDULER_ID
+							,jr.OUTPUT_PATH JOB_RUN_OUTPUT_PATH
+							,jr.JOB_HOSTNAME
+						FROM CMN_SCH_JOB_RUNS jr 
+						JOIN CMN_SCH_JOBS j ON jr.job_id = j.id
+						JOIN CMN_SCH_JOB_DEFINITIONS def ON j.job_definition_id = def.id
+						JOIN cmn_captions_nls c ON c.pk_id = def.id AND c.table_name = 'CMN_SCH_JOB_DEFINITIONS' AND c.language_code = 'en'	
+					)
+					GROUP BY job_def_type
+				)
+				WHERE avg_total_exec_time_mins >= 20
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="INVALID_TRANSACTIONS"/>
+        <core:arg value="-- J.5: LONG RUNNING JOBS --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
+      <!-- ENV.2: TIME SLICE RANGES EXCEEDING LIMIT -->
       <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
-			-- Q13 OBJECT AUDIT --
-			-- HK.4 --
-
-			SELECT id, code, is_custom, is_audit_delete,is_audit_update,is_audit_insert,purge_audit_days_old
-			FROM odf_objects
+				SELECT 'ENV.2' HC_CODE, 'TIME SLICE RANGES EXCEEDING LIMIT' HEALTH_CHECK
+					,numperiods, period_name, item_name, max_periods, NUM_SLICE_CHECK
+				FROM ( 
+					SELECT 
+							distinct numperiods, period_name, item_name
+							,CASE period_name 
+								WHEN 'Fiscal' THEN 2
+								WHEN 'Quarterly' THEN 20 
+								WHEN 'Monthly' THEN 60
+								WHEN 'Weekly' THEN 104
+								WHEN 'Daily' THEN 730
+							END MAX_PERIODS
+							,CASE WHEN numperiods > 
+							(CASE period_name 
+								WHEN 'Fiscal' THEN 2
+								WHEN 'Quarterly' THEN 20 
+								WHEN 'Monthly' THEN 60
+								WHEN 'Weekly' THEN 104
+								WHEN 'Daily' THEN 730
+							END) THEN 'Max periods exceeded by ' || TO_CHAR(NVL(numperiods,0) - (CASE period_name 
+																									WHEN 'Fiscal' THEN 2
+																									WHEN 'Quarterly' THEN 20 
+																									WHEN 'Monthly' THEN 60
+																									WHEN 'Weekly' THEN 104
+																									WHEN 'Daily' THEN 730
+																								END))
+							END NUM_SLICE_CHECK
+						FROM (
+							SELECT  sr.id as sliceid, sr.request_name  slicename, sr.frequency,
+									sr.from_date as fromdate, sr.period periodtype, sr.num_periods numperiods,
+									sr.field, sr.expiration_date as expirydate, 
+									sr.request_completed_date as timelastrun, sr.is_system,
+									period.name  period_name, item.name  item_name, 
+									frequency.name  frequency_name,
+									NVL( attr.request_name, item.lookup_code) attr_code, sr.is_dwh_request
+							FROM    prj_blb_slicerequests sr, cmn_lookups_v period, 
+									cmn_lookups_v item left outer join prj_blb_slicerequests attr on  '' || attr.id  = item.lookup_code,
+									cmn_lookups_v frequency 
+							WHERE   sr.is_synchronous = 0
+								AND     item.lookup_enum = sr.field
+								AND     period.lookup_enum = sr.period
+								AND     frequency.lookup_enum = sr.frequency
+								AND     sr.is_template = 0
+								AND     item.language_code = 'en'
+								AND     period.language_code = 'en'
+								AND     frequency.language_code = 'en'
+								AND     period.lookup_type = 'BLB_SLICE_PERIOD'
+								AND     frequency.lookup_type = 'BLB_SLICE_PERIOD'
+								AND     item.lookup_type = 'BLB_SLICE_ITEM'  
+							ORDER BY slicename ASC
+						)
+				)
+				WHERE num_slice_check IS NOT null
 			]]></core:set>
       <core:invoke method="put" on="${sql_hash}">
-        <core:arg value="OBJECT_AUDIT"/>
+        <core:arg value="-- ENV.2: TIME SLICE RANGES EXCEEDING LIMIT --"/>
         <core:arg value="${my_sql}"/>
       </core:invoke>
-      <!-- *************************** -->
-      <!-- //END: HEALTH CHECK QUERIES -->
-      <!-- *************************** -->
+      <!-- ENV.3: DWH TIME SLICE RANGES AND DATES -->
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+				SELECT 
+					DISTINCT 'ENV.3' HC_CODE, 'DWH TIME SLICE RANGES AND DATES' HEALTH_CHECK, period_name, fromdate, enddate, expirydate, numperiods, IS_DWH_REQUEST 
+				FROM (
+					SELECT  sr.id as sliceid, sr.request_name  slicename, sr.frequency,
+							sr.from_date as fromdate, sr.to_date AS enddate, sr.period periodtype, sr.num_periods numperiods,
+							sr.field, sr.expiration_date as expirydate, 
+							sr.request_completed_date as timelastrun, sr.is_system,
+							period.name  period_name, item.name  item_name, 
+							frequency.name  frequency_name,
+							NVL( attr.request_name, item.lookup_code) attr_code, sr.is_dwh_request
+					FROM    prj_blb_slicerequests sr, cmn_lookups_v period, 
+							cmn_lookups_v item left outer join prj_blb_slicerequests attr on  '' || attr.id  = item.lookup_code,
+							cmn_lookups_v frequency 
+					WHERE   sr.is_synchronous = 0
+						AND     item.lookup_enum = sr.field
+						AND     period.lookup_enum = sr.period
+						AND     frequency.lookup_enum = sr.frequency
+						AND     sr.is_template = 0
+						AND     item.language_code = 'en'
+						AND     period.language_code = 'en'
+						AND     frequency.language_code = 'en'
+						AND     period.lookup_type = 'BLB_SLICE_PERIOD'
+						AND     frequency.lookup_type = 'BLB_SLICE_PERIOD'
+						AND     item.lookup_type = 'BLB_SLICE_ITEM'  
+					ORDER BY slicename ASC
+				)
+				WHERE 1=1
+				AND IS_DWH_REQUEST = 1
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="-- ENV.3: DWH TIME SLICE RANGES AND DATES --"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <!-- ENV.4: INVALID TRANACTIONS COUNT -->
+      <core:set encode="false" escapeText="false" trim="true" var="my_sql"><![CDATA[	
+				select 'ENV.4' HC_CODE, 'INVALID TRANACTIONS COUNT' HEALTH_CHECK, count(1) INVALID_TRANSACTIONS_COUNT
+				FROM (
+					SELECT
+						I.TRANSDATE TRANSACTION_DATE
+						, I.PROJECT_CODE Project_Code       
+						, R.ID RES_ID
+						, I.QUANTITY Effort_Hours
+						, I.CHARGE_CODE Charge_code
+						, I.INPUT_TYPE Type_code   
+						, I.transclass TRANS_CLASS
+						, E.DESCRIPTION Error
+					FROM IMP_TRANSACTIONIMPORT I
+					JOIN SRM_RESOURCES R ON I.RESOURCE_CODE = R.UNIQUE_NAME
+					JOIN IMP_TRANSACTIONIMPORTERRORS E ON I.ERRORCODE = E.ERRORCODE
+				)
+			]]></core:set>
+      <core:invoke method="put" on="${sql_hash}">
+        <core:arg value="-- ENV.4: INVALID TRANACTIONS COUNT --"/>
+        <core:arg value="${my_sql}"/>
+      </core:invoke>
+      <!-- *********************************** -->
+      <!-- //END: PREPARE HEALTH CHECK QUERIES -->
+      <!-- *********************************** -->
       <!-- WRITE THE FILE -->
       <core:catch var="fileCatch">
+        <gel:log>Processing File: HEALTH_CHECK_SUMMARY.csv</gel:log>
+        <!-- SET THE FILE NAME -->
+        <core:set value="HEALTH_CHECK_SUMMARY.csv" var="fileName"/>
+        <!-- SET UP THE CSV FILE FOR WRITING-->
+        <core:new className="java.io.FileWriter" escapeText="false" var="fileWriter">
+          <core:arg type="java.lang.String" value="${filePath}/${fileName}"/>
+          <core:arg type="java.lang.Boolean" value="false"/>
+          <!-- APPEND = FALSE -->
+        </core:new>
+        <core:new className="java.io.PrintWriter" var="OutputFile">
+          <core:arg type="java.io.FileWriter" value="${fileWriter}"/>
+        </core:new>
+        <!-- <gel:log>SECTIONS: ${sql_hash.keySet()}</gel:log> -->
         <!-- GET DB CONNECTIONS -->
         <core:invoke method="getConnection" on="${clarityDB}" var="dbConn"/>
         <!-- LOOP THROUGH HEALTH CHECK QUERIES -->
         <core:forEach items="${sql_hash.keySet()}" var="sql">
-          <gel:log>Processing File: ${sql}.csv</gel:log>
-          <!-- SET THE FILE NAME -->
-          <core:set value="${sql}.csv" var="fileName"/>
-          <!-- SET UP THE CSV FILE FOR WRITING-->
-          <core:new className="java.io.FileWriter" escapeText="false" var="fileWriter">
-            <core:arg type="java.lang.String" value="${filePath}/${fileName}"/>
-            <core:arg type="java.lang.Boolean" value="false"/>
-            <!-- APPEND = FALSE -->
-          </core:new>
-          <core:new className="java.io.PrintWriter" var="OutputFile">
-            <core:arg type="java.io.FileWriter" value="${fileWriter}"/>
-          </core:new>
           <!-- 
 						<gel:log>key: ${sql}</gel:log>
 						<gel:log>value: ${sql_hash.get(sql)}</gel:log> 
 					-->
+          <!-- SECTION HEADER -->
+          <!-- <core:invoke method="println" on="${OutputFile}"> -->
+          <!-- <core:arg value="${sql}"/> -->
+          <!-- </core:invoke> -->
+          <core:if test="${debug == 1}">
+            <gel:log>Exporting Health Check Section: ${sql}</gel:log>
+          </core:if>
+          <core:if test="${debug == 1}">
+            <gel:out>Exporting Health Check Section: ${sql}</gel:out>
+          </core:if>
           <!-- QUERY THE TABLE DATA -->
           <core:catch var="selectCatch">
             <!-- PREPARE AND EXECUTE FILE QUERY -->
@@ -850,14 +1180,14 @@
           <!--CLOSE PREPARED STATEMENT AND RESULTSET -->
           <core:invoke method="close" on="${pSQLQuery}"/>
           <core:invoke method="close" on="${SQLQueryRS}"/>
-          <!-- CLOSE THE FILE -->
-          <core:invoke method="close" on="${OutputFile}"/>
         </core:forEach>
         <!-- //END: LOOP THROUGH HEALTH CHECK QUERIES -->
         <!-- CLOSE DATABASE OBJECTS -->
         <core:if test="${dbConn != null}">
           <core:invoke method="close" on="${dbConn}"/>
         </core:if>
+        <!-- CLOSE THE FILE -->
+        <core:invoke method="close" on="${OutputFile}"/>
       </core:catch>
       <!-- //END: WRITE THE FILE -->
       <core:if test="${!empty(fileCatch)}">
