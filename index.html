@@ -403,7 +403,1131 @@
     </div>
 
  
+<textarea>
+	<gel:script xmlns:core="jelly:core" xmlns:file="jelly:com.niku.union.gel.FileTagLibrary" xmlns:ftp="jelly:com.niku.union.gel.FTPTagLibrary" xmlns:gel="jelly:com.niku.union.gel.GELTagLibrary" xmlns:jelly="jelly:core" xmlns:mail="jelly:email" xmlns:soap="jelly:com.niku.union.gel.SOAPTagLibrary" xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:sql="jelly:sql" xmlns:xog="http://www.niku.com/xog" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+	<!--**********************************************************************************************
+	 Name	     :  Clarity Data Health Check Report
+	 Description :  This script will perform Clarity Data Health Analysis and Report discrepancies.
+	 Author	     :	Kalyan Sagar Patwari
+	 Version     :  1.0
+	 Date(MM/DD/YYYY) : 11/25/2017
+	**********************************************************************************************-->
+	<!-- Initialize Parameters -->
+	<jelly:set value="ClarityAdmin@td.com" var="emailFrom"/>
+	<!-- This gets the NIKU_HOME Location -->
+	<core:invokeStatic className="java.lang.System" method="getenv" var="NIKU_HOME">
+		<core:arg value="NIKU_HOME"/>
+	</core:invokeStatic>
+	<!-- This Sets the Data Source -->
+	<gel:setDataSource dbId="Niku"/>
+	<core:catch var="queryError1">
+		<!-- Fetch Application URL -->
+		<core:invokeStatic className="com.niku.union.config.ConfigurationManager" method="getInstance" var="config"/>
+		<core:set value="${config.getWebContextUrl()}" var="v_XOGURL"/>
+		<gel:log>URL :${v_XOGURL}</gel:log>
+		<!-- This Query gets displays the Information of Environment from which Email was sent  -->
+		<sql:query escapeText="false" var="Email"><![CDATA[
+				SELECT
+				(CASE WHEN UPPER(SUBSTR('${v_XOGURL}',INSTR('${v_XOGURL}','-',1,1)+1,(INSTR('${v_XOGURL}','.',1,1))-
+				(INSTR('${v_XOGURL}','-',1,1)+1))) NOT IN ('DEV','TEST','QA','BAT','PAT') THEN 'PROD' ELSE
+				UPPER(SUBSTR('${v_XOGURL}',INSTR('${v_XOGURL}','-',1,1)+1,(INSTR('${v_XOGURL}','.',1,1))-
+				(INSTR('${v_XOGURL}','-',1,1)+1))) END) Env,
+				(SELECT to_char(TD_CONFIG_DSC) FROM ODF_CA_TD_CONFIG WHERE TD_CONFIG_NAME = 'GENERICUSERS') GENERICUSERS
+				FROM 
+				DUAL]]></sql:query>
+		<core:set value="${Email.rows[0].Env}" var="env"/>
+		<core:set value="${Email.rows[0].GENERICUSERS}" var="v_GenericUsers"/>
+		<!-- This Query gets Information that the Process needs -->
+		<sql:query escapeText="false" var="result"><![CDATA[
+				SELECT
+				'Jobs' CATEGORY,
+				(CASE WHEN SUM(DECODE(JLG.STATUS_CODE,'FAILED',1,0))>0 THEN 'Error' ELSE 'OK' END) TYPECHECK_STATUS,
+				COUNT(JLG.ID) TOTAL,
+				NVL(SUM(DECODE(JlG.STATUS_CODE,'FAILED',1,0)),0) FAILED,
+				'Not Applicable' TIMESLICE,
+				'Not Applicable' PROCESSENGINE
+				FROM 
+				CMN_SCH_JOB_DEFINITIONS JD
+				,CMN_SCH_JOBS JR
+				,CMN_SCH_JOB_RUNS JRN
+				,CMN_SCH_JOB_LOGS JLG
+				,CMN_LOOKUPS_V RPT 
+				WHERE JD.ID=JR.JOB_DEFINITION_ID 
+				AND JR.ID = JRN.JOB_ID
+				AND JRN.ID = JLG.JOB_RUN_ID
+				AND RPT.ID = JD.JOB_TYPE AND LANGUAGE_CODE = 'en' AND RPT.LOOKUP_TYPE = 'SCH_JOB_TYPE'
+				AND RPT.LOOKUP_CODE != 'REPORT'
+				AND JLG.STATUS_CODE IN ('COMPLETED','FAILED')
+				AND JLG.CREATED_DATE > SYSDATE-1
+				
+				UNION ALL
+				
+				SELECT
+				'Reports' CATEGORY,
+				(CASE WHEN SUM(DECODE(JLG.STATUS_CODE,'FAILED',1,0))>0 THEN 'Error' ELSE 'OK' END) TYPECHECK_STATUS,
+				COUNT(JLG.ID) TOTAL,
+				NVL(SUM(DECODE(JLG.STATUS_CODE,'FAILED',1,0)),0) FAILED,
+				'Not Applicable' TIMESLICE,
+				'Not Applicable' PROCESSENGINE
+				FROM 
+				CMN_SCH_JOB_DEFINITIONS JD
+				,CMN_SCH_JOBS JR
+				,CMN_SCH_JOB_RUNS JRN
+				,CMN_SCH_JOB_LOGS JLG
+				,CMN_LOOKUPS_V RPT 
+				WHERE JD.ID=JR.JOB_DEFINITION_ID 
+				AND JR.ID = JRN.JOB_ID
+				AND JRN.ID = JLG.JOB_RUN_ID
+				AND RPT.ID = JD.JOB_TYPE AND LANGUAGE_CODE = 'en' AND RPT.LOOKUP_TYPE = 'SCH_JOB_TYPE'
+				AND RPT.LOOKUP_CODE = 'REPORT'
+				AND JLG.STATUS_CODE IN ('COMPLETED','FAILED')
+				AND JLG.CREATED_DATE > SYSDATE-1
+				
+				UNION ALL
+				
+				SELECT 
+				'Processes' CATEGORY,
+                (CASE WHEN SUM(DECODE(STATUS_CODE,'BPM_PIS_ERROR',1,0))>0 THEN 'Error' ELSE 'OK' END) TYPECHECK_STATUS,
+                COUNT(ID) TOTAL,
+                NVL(SUM(DECODE(STATUS_CODE,'BPM_PIS_ERROR',1,0)),0) FAILED,
+                'Not Applicable' TIMESLICE,
+                'Not Applicable' PROCESSENGINE
+				FROM 
+				BPM_RUN_PROCESSES
+				WHERE 
+				LAST_UPDATED_DATE >= SYSDATE-1
 
+				UNION ALL
+				
+				SELECT 
+				'Timesheet Locks' CATEGORY,
+                (CASE WHEN COUNT(PRRECORDID)>0 THEN 'Error' ELSE 'OK' END) TYPECHECK_STATUS,
+                 COUNT(PRRECORDID) TOTAL,
+                 0 FAILED,
+                 'Not Applicable' TIMESLICE,
+                 'Not Applicable' PROCESSENGINE
+				 FROM 
+				 PRLOCK WHERE PRTABLENAME ='PRTIMESHEET' AND PRNAME = '~prTimeEntry' 
+				 
+				 UNION ALL
+				 
+				 SELECT
+				 'Project Creation Locks',
+				 (CASE WHEN COUNT(PRRECORDID) >0 THEN 'Error' ELSE 'OK' END) TYPECHECK_STATUS,
+				 COUNT(PRRECORDID) TOTAL,
+				 0 FAILED,
+				 'Not Applicable' TIMESLICE,
+				 'Not Applicable' PROCESSENGINE
+				 FROM
+				 PRLOCK WHERE PRTABLENAME = 'SRM_PROJECTS' AND PRNAME = 'prInsertServiceLock'
+				 			 
+				 ]]></sql:query>
+		<!-- This Query gets Timeslice Information that the Process needs -->
+		<sql:query escapeText="false" var="result2"><![CDATA[ SELECT
+CATEG,
+(CASE WHEN CMP > 0 THEN 'Error' ELSE 'OK' END) TYPE_CHECK_STATUS,
+0 TOTAL,
+0 FAILED,
+TIMESLICE,
+'NOT APPLICABLE' PROCESSENGINE 
+FROM
+(
+	SELECT
+	'Timeslice Requests Sync' CATEG,
+	DECODE(TRIM(SL_DATA.SL_UPD_TM),TRIM(SL_JOB_DATA.TIMESLICE),0,1) CMP,
+	TIMESLICE
+	FROM
+	(
+		SELECT 
+		TO_CHAR(MAX(REQUEST_COMPLETED_DATE),'MM-DD-YYYY HH24:MI') SL_UPD_TM
+		FROM 
+		PRJ_BLB_SLICEREQUESTS
+		WHERE
+		IS_VISIBLE = 1 AND IS_ACTIVE = 1 
+		AND REQUEST_COMPLETED_DATE IS NOT NULL
+  )SL_DATA
+  FULL OUTER JOIN 
+  (
+		SELECT 
+		TRIM(TO_CHAR(MAX(LAST_UPDATED_DATE),'MM-DD-YYYY HH24:MI')) AS TIMESLICE
+		FROM 
+		CMN_SCH_JOBS 
+		WHERE 
+		JOB_DEFINITION_ID = 50064
+  ) SL_JOB_DATA ON 1=1
+)
+  
+]]></sql:query>
+		<!-- This Query gets Process Engine Heartbeat Information that the Process Needs -->
+		<sql:query escapeText="false" var="result3"><![CDATA[
+				            SELECT 
+				'Time Slices' CATEGORY,
+				(CASE WHEN ROUND(1440 * (SYSDATE - (LAST_UPDATED_DATE)),2) > 15 THEN 'Error' ELSE 'Time Slices are updating every 15 minutes' END) TYPECHECK_STATUS,
+				0 TOTAL,
+				0 FAILED,
+				'NOT APPLICABLE' PROCESSENGINE,
+				TO_CHAR(LAST_UPDATED_DATE+INTERVAL '3' Hour,'MM-DD-YYYY HH:MI:SS') AS TIMESLICE
+				FROM 
+				CMN_SCH_JOBS
+				WHERE 
+				JOB_DEFINITION_ID = 50064
+				AND STATUS_CODE NOT IN ('COMPLETED','CANCELLED')
+				
+				UNION ALL
+			
+			
+			SELECT 
+				'Process Engine Heart Beat' CATEGORY,
+				(CASE WHEN ROUND(1440 * (SYSDATE - MAX(HEART_BEAT)),2) <15 THEN 'Heartbeat is updating every 15 minutes'
+                 ELSE 'Error' END) TYPECHECK_STATUS,
+                 COUNT(ID) TOTAL,
+                 0 FAILED,
+                 'Not Applicable' TIMESLICE,
+                 TO_CHAR(MAX(HEART_BEAT)+INTERVAL '3' Hour,'MM-DD-YYYY HH:MI:SS') PROCESSENGINE
+				FROM 
+				BPM_RUN_PROCESS_ENGINES]]></sql:query>
+	</core:catch>
+	<!-- This Query gets the Current Date & Time Information -->
+	<sql:query escapeText="false" var="result4"><![CDATA[
+				SELECT 
+				TO_CHAR(SYSDATE, 'DAY'),
+				TO_CHAR ( SYSDATE , 'MM/DD/YYYY'),
+				TO_CHAR(SYSDATE+INTERVAL '3' HOUR, 'HH24:MI:SS'),
+				TO_CHAR(SYSDATE, 'HH24:MI:SS')
+				FROM DUAL]]></sql:query>
+	<!-- This Query gets the Number of ERROR, ABORTED, COMPLETED & RUNNING Processes-->
+	<sql:query escapeText="false" var="result7a"><![CDATA[  
+  
+				SELECT 
+				'Completed' STATUS, 
+				COUNT(1) COUNT, 
+				'If high in number, we should schedule the Delete Process Instances job' COMMENTS 
+				FROM 
+				BPM_RUN_PROCESSES 
+				WHERE 
+				STATUS_CODE='BPM_PIS_DONE'
+        
+				UNION ALL
+        
+				SELECT 
+				'Aborted' STATUS,
+				COUNT(1) ,
+				'If high in number, we should schedule the Delete Process Instances job' COMMENTS 
+				FROM 
+				BPM_RUN_PROCESSES 
+				WHERE STATUS_CODE='BPM_PIS_ABORTED']]></sql:query>
+	<sql:query escapeText="false" var="result7c"><![CDATA[
+				SELECT 
+				'Error' STATUS,
+				count(1) , 
+				'Comment' COMMENTS 
+				FROM
+				BPM_RUN_PROCESSES 
+				WHERE 
+				STATUS_CODE='BPM_PIS_ERROR']]></sql:query>
+	<sql:query escapeText="false" var="result7ci"><![CDATA[
+				SELECT 
+				TO_CHAR(START_DATE,'MM-DD-YYYY')
+				FROM
+				BPM_RUN_PROCESSES 
+				WHERE 
+				STATUS_CODE='BPM_PIS_ERROR' 
+				AND ID = (SELECT MIN(ID) FROM BPM_RUN_PROCESSES WHERE STATUS_CODE='BPM_PIS_ERROR')]]></sql:query>
+	<sql:query escapeText="false" var="result7d"><![CDATA[
+				SELECT 
+				'Running' STATUS,
+				COUNT(1) , 
+				'Comment' COMMENTS
+				FROM 
+				BPM_RUN_PROCESSES 
+				WHERE 
+				STATUS_CODE='BPM_PIS_RUNNING']]></sql:query>
+	<sql:query escapeText="false" var="result7di"><![CDATA[
+				SELECT 
+				TO_CHAR(START_DATE,'MM-DD-YYYY') 
+				FROM 
+				BPM_RUN_PROCESSES 
+				WHERE 
+				STATUS_CODE='BPM_PIS_RUNNING' 
+				AND ID=(SELECT MIN(ID) FROM BPM_RUN_PROCESSES WHERE STATUS_CODE='BPM_PIS_RUNNING')
+				
+				]]></sql:query>
+	<!-- This Query gets Audit Trail Information-->
+	<sql:query escapeText="false" var="result8"><![CDATA[
+				SELECT
+				'Audit Trail Records' TYPE,
+	    		TO_CHAR(MIN(CREATED_DATE),'MM-DD-YYYY'), 
+				COUNT(1) 
+				FROM
+				CMN_AUDITS]]></sql:query>
+	<!-- This Query identifies whether jobs are being cleaned or not-->
+	<sql:query escapeText="false" var="result9"><![CDATA[
+                SELECT 
+				'Job run instances' TYPE,
+				TO_CHAR(MIN(RUNS.START_DATE),'MM-DD-YYYY'),
+				COUNT(1) 
+				FROM
+				CMN_SCH_JOB_RUNS RUNS
+				INNER JOIN CMN_SCH_JOBS JOBS ON RUNS.JOB_ID = JOBS.ID 
+				INNER JOIN CMN_SCH_JOB_DEFINITIONS DEFS ON JOBS.JOB_DEFINITION_ID = DEFS.id
+	
+]]></sql:query>
+	<!--This query captures Jobs running over 60 minutes in the last 30 days-->
+	<sql:query escapeText="false" var="result10"><![CDATA[	SELECT
+				NAME, 
+				RUNS.ID, 
+				TO_CHAR(RUNS.START_DATE+INTERVAL '3' Hour,'MM-DD-YYYY HH:MI:SS'), 
+				ROUND((RUNS.END_DATE - RUNS.START_DATE)*24*60,2) DIFF_MINUTES
+				FROM
+				cmn_sch_job_runs RUNS,
+				CMN_SCH_JOBS JOBS,
+				CMN_SCH_JOB_DEFINITIONS  DEFS
+				WHERE
+				RUNS.JOB_ID = JOBS.ID and 
+				JOBS.JOB_DEFINITION_ID = DEFS.ID and
+				RUNS.START_DATE > sysdate - 30 and
+				(RUNS.END_DATE - RUNS.START_DATE)*24*60 > 60
+				ORDER BY 4 DESC]]></sql:query>
+	<!--This query dynamically pulls the sponsoring cost center table name-->
+	<sql:query escapeText="false" var="scc"><![CDATA[
+				SELECT
+				TABLE_NAME
+				FROM
+					(SELECT
+					TABLE_NAME 
+					FROM 
+					PRJ_BLB_SLICEREQUESTS 
+					WHERE 
+					REQUEST_NAME LIKE '%MONTHLYCUSTOMERCOSTCENTREHISTALLOC%' ORDER BY TABLE_NAME)
+				WHERE
+				ROWNUM <= 1]]></sql:query>
+	<core:set value="${scc.rows[0].TABLE_NAME}" var="SCC_PER"/>
+	<!--This query retrieves Process Error Count by User-->
+	<sql:query escapeText="false" var="result11"><![CDATA[
+  
+			   SELECT 
+			   NLS.NAME NAME, 
+			   COUNT(NLS.NAME) TOTAL_COUNT
+			   FROM 
+               BPM_RUN_PROCESSES PROC
+               INNER JOIN  BPM_DEF_PROCESS_VERSIONS VER ON VER.ID = PROC.PROCESS_VERSION_ID
+               INNER JOIN BPM_DEF_PROCESSES DEF  ON DEF.ID=VER.PROCESS_ID
+               INNER JOIN CMN_CAPTIONS_NLS NLS ON NLS.TABLE_NAME='BPM_DEF_PROCESSES' AND NLS.LANGUAGE_CODE='en' AND NLS.PK_ID=DEF.ID
+               WHERE
+			   PROC.STATUS_CODE='BPM_PIS_ERROR' 
+               AND PROC.CREATED_DATE > SYSDATE - 1
+               GROUP BY NLS.NAME]]></sql:query>
+	<!--This query retrieves 
+  1. Projects Missing IT Numbers from Effective Jul'17
+  2. No of Project having SCC Discrepancies
+  3. Task Assignment Discrepany Count -->
+	<sql:query escapeText="false" var="result12"><![CDATA[
+			  SELECT 
+			  'Number of Projects Missing IT Numbers',
+			  COUNT(1) PROJ_CNT 
+			  FROM
+			  INV_INVESTMENTS INV 
+			  INNER JOIN PAC_MNT_PROJECTS PAC ON INV.ID = PAC.ID AND INV.ODF_OBJECT_CODE = 'project'
+			  INNER JOIN INV_PROJECTS INV_PRJ ON INV.ID = INV_PRJ.PRID AND INV_PRJ.IS_TEMPLATE = 0 AND INV_PRJ.IS_PROGRAM = 0
+			  INNER JOIN ODF_CA_PROJECT ODF ON ODF.ID = INV.ID
+			  WHERE 
+			  NVL(UPPER(ODF.TD_IT_NUMBER),'Z') NOT LIKE 'IT%'
+			  AND INV.CREATED_DATE > = TO_DATE('01-JUL-17','DD-MON-YY')
+					
+			  UNION ALL
+					
+			  SELECT 
+              'Number of Projects with SCC discrepancies' ALLOC_DIS,
+			  COUNT(PROJECT_ID) CNT
+              FROM
+                  (
+					SELECT 
+					INV.CODE PROJECT_ID,
+					INV.NAME PROJECT_NAME,
+					DEPARTCODE,
+					TD_ALLOC_PERCENT CURRENT_SLICE,
+					SLICE.SLICE SEGMENT_SLICE
+					FROM ODF_CA_TD_CUST_COST_CENTRE CC
+					INNER JOIN (SELECT 
+					            PRJ_OBJECT_ID,
+								SLICE_DATE,
+								ROUND((CASE WHEN SLICE=0.001 THEN 0 ELSE SLICE END),0) SLICE, RAK
+								FROM(
+									SELECT 
+									PRJ_OBJECT_ID,
+									SLICE_DATE,
+									SLICE,
+									RANK() OVER (PARTITION BY PRJ_OBJECT_ID ORDER BY TO_CHAR(SLICE_DATE,'YYYYMMDDHH24MMSS') DESC) RAK
+                                    FROM ${SCC_PER}
+                                     )
+                                    WHERE RAK=1
+                                 ) SLICE ON SLICE.PRJ_OBJECT_ID=CC.ID
+                   INNER JOIN INV_INVESTMENTS INV ON CC.ODF_PARENT_ID=INV.ID
+                   INNER JOIN DEPARTMENTS DEPT ON DEPT.ID=CC.TD_CST_CNTR
+                   WHERE 
+				   ROUND(TD_ALLOC_PERCENT,0)!=SLICE.SLICE
+                   )
+   
+				   UNION ALL
+     
+					SELECT 
+					'Task Assignment Discrepancy Count' time_cnt, 
+					NVL(COUNT(TSHEET.PRID),0) CNT
+					FROM 
+					PRTIMEENTRY TIMEENTRY
+					INNER JOIN PRTIMESHEET TSHEET ON TIMEENTRY.PRTIMESHEETID = TSHEET.PRID
+					INNER JOIN PRTIMEPERIOD TPRID ON TSHEET.PRTIMEPERIODID = TPRID.PRID 
+					WHERE
+					TIMEENTRY.PRASSIGNMENTID NOT IN (SELECT ASSIGN.PRID FROM PRASSIGNMENT ASSIGN)
+					AND TPRID.PRISOPEN = 1
+					
+					UNION ALL
+					
+					SELECT 
+					'Time Entry with Null "PRID" Count',
+					COUNT(PRID) 
+					FROM PRTIMEENTRY WHERE PRID IS NULL
+					
+					
+					UNION ALL
+					
+                    SELECT 
+                    
+					'Resource added into the Template',
+                     NVL(COUNT(CODE),0) CNT
+                     
+                     FROM
+					 (
+					   SELECT DISTINCT CODE FROM INV_INVESTMENTS INV INNER JOIN 
+					   PRTEAM PRT ON PRT.PRPROJECTID = INV.ID
+					   INNER JOIN INV_PROJECTS INVP ON INVP.PRID = INV.ID AND 
+					   INVP.IS_TEMPLATE = 1 AND INV.IS_ACTIVE = 1
+					   INNER JOIN PRJ_RESOURCES PRJ ON PRJ.PRID = PRT.PRRESOURCEID 
+					   AND PRJ.PRISROLE = 0
+					  ) 
+					 
+                    UNION ALL
+										
+					SELECT
+					'AP Duplicate Transactions Count',
+					CNT  Transactions
+					FROM(
+					SELECT COUNT(PROJECT_CODE) CNT FROM
+					(                   
+					SELECT PROJECT_CODE, RESOURCE_ID, TASK_ID, TRANSDATE, COUNT(TRIM(EXTERNAL_ID))EXTERNAL_ID
+					FROM 
+					(
+					SELECT PROJECT_CODE,RESOURCE_ID, TASK_ID, TRUNC(TRANSDATE) TRANSDATE,EXTERNAL_ID FROM PPA_WIP
+					WHERE 
+					EXTERNAL_ID LIKE 'AP%' AND SOURCEMODULE = 50 AND STATUS = 0
+					ORDER BY EXTERNAL_ID
+					)
+					WHERE
+					TRUNC(TRANSDATE) BETWEEN  ADD_MONTHS((LAST_DAY(SYSDATE)+1),-2) AND LAST_DAY(SYSDATE)
+					GROUP BY PROJECT_CODE,RESOURCE_ID, TASK_ID, TRANSDATE, EXTERNAL_ID
+					HAVING COUNT(TRIM(EXTERNAL_ID)) > 1
+					))
+					
+					UNION ALL
+				
+					SELECT
+					'FA Duplicate Transactions Count',
+					CNT Transactions
+					FROM(
+					SELECT COUNT(PROJECT_CODE) CNT FROM
+					(                   
+					SELECT PROJECT_CODE, RESOURCE_ID, TASK_ID, TRANSDATE, COUNT(TRIM(EXTERNAL_ID))EXTERNAL_ID
+					FROM 
+					(
+					SELECT PROJECT_CODE,RESOURCE_ID, TASK_ID, TRUNC(TRANSDATE) TRANSDATE,EXTERNAL_ID FROM PPA_WIP
+					WHERE 
+					EXTERNAL_ID LIKE 'FA%' AND SOURCEMODULE = 50 AND STATUS = 0
+					ORDER BY EXTERNAL_ID
+					)
+					WHERE
+					TRUNC(TRANSDATE) BETWEEN  ADD_MONTHS((LAST_DAY(SYSDATE)+1),-2) AND LAST_DAY(SYSDATE)
+					GROUP BY PROJECT_CODE,RESOURCE_ID, TASK_ID, TRANSDATE, EXTERNAL_ID
+					HAVING COUNT(TRIM(EXTERNAL_ID)) > 1
+					))
+				
+					UNION ALL
+
+					SELECT
+					'TD Transaction Entry Duplicates Count',
+					CNT  Transactions
+					FROM(
+					SELECT COUNT(PROJECT_CODE) CNT FROM
+					(                   
+					SELECT PROJECT_CODE, RESOURCE_ID, TASK_ID, TRANSDATE, COUNT(TRIM(EXTERNAL_ID))EXTERNAL_ID
+					FROM 
+					(
+					SELECT PROJECT_CODE,RESOURCE_ID, TASK_ID, TRUNC(TRANSDATE) TRANSDATE,EXTERNAL_ID FROM PPA_WIP
+					WHERE 
+					EXTERNAL_ID LIKE 'TD%' AND SOURCEMODULE = 50 AND STATUS = 0
+					ORDER BY EXTERNAL_ID
+					)
+					WHERE
+					TRUNC(TRANSDATE) BETWEEN  ADD_MONTHS((LAST_DAY(SYSDATE)+1),-2) AND LAST_DAY(SYSDATE)
+					GROUP BY PROJECT_CODE,RESOURCE_ID, TASK_ID, TRANSDATE, EXTERNAL_ID
+					HAVING COUNT(TRIM(EXTERNAL_ID)) > 1
+					))				
+					
+					UNION ALL
+
+					SELECT
+					'Timesheet Adjustment Duplicates Count',
+					CNT Transactions
+					FROM(
+					SELECT COUNT(PROJECT_CODE) CNT FROM
+					(                   
+					SELECT PROJECT_CODE, RESOURCE_ID, TASK_ID, TRANSDATE, COUNT(TRIM(EXTERNAL_ID))EXTERNAL_ID
+					FROM 
+					(
+					SELECT PROJECT_CODE,RESOURCE_ID, TASK_ID, TRUNC(TRANSDATE) TRANSDATE,EXTERNAL_ID FROM PPA_WIP
+					WHERE 
+					EXTERNAL_ID LIKE 'TS%' AND SOURCEMODULE = 50 AND STATUS = 0
+					ORDER BY EXTERNAL_ID
+					)
+					WHERE
+					TRUNC(TRANSDATE) BETWEEN  ADD_MONTHS((LAST_DAY(SYSDATE)+1),-2) AND LAST_DAY(SYSDATE)
+					GROUP BY PROJECT_CODE,RESOURCE_ID, TASK_ID, TRANSDATE, EXTERNAL_ID
+					HAVING COUNT(TRIM(EXTERNAL_ID)) > 1
+					))				
+						 	
+					UNION ALL
+					
+					SELECT 
+					'User''s Missing Favorites Menu Access Count',
+					COUNT(RESOURCE_ID) CNT
+					FROM 
+					(
+					SELECT 
+					RESOURCE_ID,
+					(CASE WHEN RIGHT_ID != 5110271 THEN 1 ELSE 0 END) CNT
+					FROM
+					(        
+					SELECT  DISTINCT
+					CMN.ID RESOURCE_ID,
+					NVL(RIGHT_ID,0) RIGHT_ID
+					FROM   
+					CMN_SEC_USERS CMN 
+					LEFT JOIN (SELECT DISTINCT PRINCIPAL_ID,PRINCIPAL_TYPE,RIGHT_ID FROM CMN_SEC_ASSGND_OBJ_PERM WHERE RIGHT_ID = 5110271
+					AND PRINCIPAL_TYPE = 'USER' ) AP
+					ON AP.PRINCIPAL_ID = CMN.ID 
+					WHERE
+					CMN.USER_STATUS_ID =200
+					)
+					)
+					WHERE
+					CNT = 1
+					
+					UNION ALL
+					
+					SELECT
+						'Resource''s with more than one RM Delegate Count',
+						count(1) num_of_res
+					FROM
+						(
+						SELECT
+							SRM.UNIQUE_NAME RES_ID,
+							COUNT(1) NUM_OF_RM_DEL
+						FROM
+							SRM_RESOURCES SRM
+							INNER JOIN ODF_CA_td_rm_del_info RM_DEL ON SRM.ID = RM_DEL.ODF_PARENT_ID
+						GROUP BY
+							SRM.UNIQUE_NAME
+						HAVING
+							COUNT(1) > 1
+						)
+					
+					UNION ALL
+					
+					SELECT
+						'Manual Vouchers for Previous Month - Posted after Grace Period (In Invalid Transaction Staging)',
+						COUNT(1)
+					FROM
+						(
+							SELECT
+								WIP.PROJECT_CODE,
+								WIP.RESOURCE_CODE,
+								TRAN.CREATED_DATE VOUCHER_CREATED_DATE,
+								WIP.TRANSDATE VOUCHER_TRANSACTION_DATE,
+								WIP.IMPORTDATE VOUCHER_WIP_POSTED_DATE,
+								TRCCTRL.TD_GRACE_PERIOD TRANSACTION_CONTROL_GRACE_PERIOD,
+								--TCRTDATE.PERIOD_NAME VOUCHER_CREATED_MONTH,
+								--TTRANDATE.PERIOD_NAME VOUCHER_POSTED_MONTH,
+								WIP.EXTERNAL_ID,
+								WIP.QUANTITY,
+								WIP.RATE,
+								WIP.COST
+							FROM
+								IMP_TRANSACTIONIMPORT WIP
+								INNER JOIN ODF_CA_TD_TRANSACTIONS TRAN ON WIP.EXTERNAL_ID = 'TD_TRANSACTION_ENTRY_'||TRAN.CODE
+								INNER JOIN BIZ_COM_PERIODS TCRTDATE ON (TRUNC(TRAN.CREATED_DATE) BETWEEN TCRTDATE.START_DATE AND TCRTDATE.END_DATE-1)
+								INNER JOIN BIZ_COM_PERIODS TTRANDATE ON (TRUNC(TRAN.TD_TRANSACTIONDATE) BETWEEN TTRANDATE.START_DATE AND TTRANDATE.END_DATE-1)
+								INNER JOIN
+										(
+											SELECT
+												BIZ.ID,
+												BIZ.START_DATE,
+												BIZ.END_DATE-1 END_DATE,
+												BIZ.PERIOD_NAME,
+												TRUNC(NVL(TRANSCTRL.TD_GRACE_PERDATE_BD8,TRANSCTRL.TD_GRACE_PER_DATE)) TD_GRACE_PERIOD
+											FROM
+												ODF_CA_TD_ACTUALTRANSCTRL TRANSCTRL
+												INNER JOIN BIZ_COM_PERIODS BIZ ON TRANSCTRL.TD_FISCAL_PERIOD = BIZ.ID
+											WHERE
+												BIZ.PERIOD_TYPE = 'MONTHLY' AND BIZ.ENTITY_ID IS NOT NULL AND BIZ.IS_ACTIVE = 1
+										) TRCCTRL ON TTRANDATE.ID = TRCCTRL.ID
+							WHERE
+								TCRTDATE.PERIOD_TYPE = 'MONTHLY' AND TCRTDATE.ENTITY_ID IS NOT NULL AND TCRTDATE.IS_ACTIVE = 1
+								AND TTRANDATE.PERIOD_TYPE = 'MONTHLY' AND TTRANDATE.ENTITY_ID IS NOT NULL AND TTRANDATE.IS_ACTIVE = 1
+								AND (TRUNC(SYSDATE) BETWEEN TRUNC(TCRTDATE.START_DATE) AND TRUNC(TCRTDATE.END_DATE-1))
+								AND TCRTDATE.START_DATE > TTRANDATE.START_DATE
+								AND TRUNC(WIP.IMPORTDATE) > TRCCTRL.TD_GRACE_PERIOD
+								AND WIP.IMPORTSTATUS != 'H'
+						)
+					
+					UNION ALL
+					
+					SELECT
+						'Manual Vouchers for Previous Month - Posted after Grace Period (In WIP)',
+						COUNT(1)
+					FROM
+						(
+							SELECT
+								WIP.PROJECT_CODE,
+								WIP.RESOURCE_CODE,
+								TRAN.CREATED_DATE VOUCHER_CREATED_DATE,
+								WIP.TRANSDATE VOUCHER_TRANSACTION_DATE,
+								WIP.LASTUPDATEDATE VOUCHER_WIP_POSTED_DATE,
+								TRCCTRL.TD_GRACE_PERIOD TRANSACTION_CONTROL_GRACE_PERIOD,
+								--TCRTDATE.PERIOD_NAME VOUCHER_CREATED_MONTH,
+								--TTRANDATE.PERIOD_NAME VOUCHER_POSTED_MONTH,
+								WIP.EXTERNAL_ID,
+								WIP.QUANTITY,
+								WIPV.ACTUALCOST,
+								WIPV.TOTALCOST
+							FROM
+								PPA_WIP WIP
+								INNER JOIN PPA_WIP_VALUES WIPV ON WIP.TRANSNO = WIPV.TRANSNO
+								INNER JOIN ODF_CA_TD_TRANSACTIONS TRAN ON WIP.EXTERNAL_ID = 'TD_TRANSACTION_ENTRY_'||TRAN.CODE
+								INNER JOIN BIZ_COM_PERIODS TCRTDATE ON (TRUNC(TRAN.CREATED_DATE) BETWEEN TCRTDATE.START_DATE AND TCRTDATE.END_DATE-1)
+								INNER JOIN BIZ_COM_PERIODS TTRANDATE ON (TRUNC(TRAN.TD_TRANSACTIONDATE) BETWEEN TTRANDATE.START_DATE AND TTRANDATE.END_DATE-1)
+								INNER JOIN
+										(
+											SELECT
+												BIZ.ID,
+												BIZ.START_DATE,
+												BIZ.END_DATE-1 END_DATE,
+												BIZ.PERIOD_NAME,
+												TRUNC(NVL(TRANSCTRL.TD_GRACE_PERDATE_BD8,TRANSCTRL.TD_GRACE_PER_DATE)) TD_GRACE_PERIOD
+											FROM
+												ODF_CA_TD_ACTUALTRANSCTRL TRANSCTRL
+												INNER JOIN BIZ_COM_PERIODS BIZ ON TRANSCTRL.TD_FISCAL_PERIOD = BIZ.ID
+											WHERE
+												BIZ.PERIOD_TYPE = 'MONTHLY' AND BIZ.ENTITY_ID IS NOT NULL AND BIZ.IS_ACTIVE = 1
+										) TRCCTRL ON TTRANDATE.ID = TRCCTRL.ID
+							WHERE
+								WIP.STATUS = 0
+								AND WIPV.CURRENCY_TYPE = 'HOME'
+								--AND UPPER(WIP.EXTERNAL_ID) LIKE 'TD_TRANSACTION_ENTRY%'
+								--AND TRAN.TD_TRANS_STATUS = 7
+								AND TCRTDATE.PERIOD_TYPE = 'MONTHLY' AND TCRTDATE.ENTITY_ID IS NOT NULL AND TCRTDATE.IS_ACTIVE = 1
+								AND (TRUNC(SYSDATE) BETWEEN TRUNC(TCRTDATE.START_DATE) AND TRUNC(TCRTDATE.END_DATE-1))
+								AND TTRANDATE.PERIOD_TYPE = 'MONTHLY' AND TTRANDATE.ENTITY_ID IS NOT NULL AND TTRANDATE.IS_ACTIVE = 1
+								AND TCRTDATE.START_DATE > TTRANDATE.START_DATE
+								AND TRUNC(WIP.LASTUPDATEDATE) > TRCCTRL.TD_GRACE_PERIOD
+						)
+					
+					UNION ALL
+					
+					SELECT
+						'Projects Excluded from GL due to blank Project Phase',
+						COUNT(1)
+					FROM
+						(
+							SELECT
+								DISTINCT
+								INV.CODE
+							FROM
+								INV_INVESTMENTS INV
+								INNER JOIN ODF_CA_PROJECT OCP ON INV.ID = OCP.ID
+								INNER JOIN INV_PROJECTS INP ON INV.ID = INP.PRID
+								INNER JOIN PAC_MNT_PROJECTS PMP ON INV.ID = PMP.ID
+								INNER JOIN
+								(
+									SELECT
+										WIP.INVESTMENT_ID
+									FROM
+										PPA_WIP WIP
+										INNER JOIN BIZ_COM_PERIODS TCRTDATE ON (TRUNC(WIP.TRANSDATE) BETWEEN TCRTDATE.START_DATE AND TCRTDATE.END_DATE-1)
+									WHERE
+										WIP.STATUS = 0
+										AND TCRTDATE.PERIOD_TYPE = 'MONTHLY' AND TCRTDATE.ENTITY_ID IS NOT NULL AND TCRTDATE.IS_ACTIVE = 1
+										AND (TRUNC(SYSDATE) BETWEEN TRUNC(TCRTDATE.START_DATE) AND TRUNC(TCRTDATE.END_DATE-1))
+								) WIP1 ON INV.ID = WIP1.INVESTMENT_ID
+							WHERE
+								INP.IS_PROGRAM = 0 AND INP.IS_TEMPLATE = 0
+								AND OCP.TD_BILLABLE = 4039
+								AND 
+								(
+								REGEXP_LIKE(OCP.TD_IT_NUMBER, '^IT[0-9]{4,5}[A-Za-z]{0,3}$') 
+								OR OCP.TD_IT_NUMBER LIKE 'ITP%'
+								)
+								AND PMP.LOCATIONID = 'td_canada'
+								AND INV.STAGE_CODE IS NULL
+						)
+						
+					UNION ALL
+					
+					SELECT
+						'Number of Applications with Resources Allocated',
+						COUNT(DISTINCT APPL_ID) NUM_OF_APPL_WITH_RES_ADDED_TO_TEAM
+					FROM
+						(
+							SELECT
+								INV.CODE APPL_ID,
+								INV.NAME APPL_NAME,
+								SRM.UNIQUE_NAME RES_ID_ADDED_TO_TEAM
+							FROM
+								INV_INVESTMENTS INV
+								INNER JOIN PRTEAM TM ON INV.ID = TM.PRPROJECTID
+								INNER JOIN SRM_RESOURCES SRM ON TM.PRRESOURCEID = SRM.ID
+							WHERE
+								INV.IS_ACTIVE = 1
+								AND INV.ODF_OBJECT_CODE = 'application'
+						) APPL
+						
+					UNION ALL
+					
+					SELECT
+						'Number of Projects with Captions/Tooltips discrepancy',
+						COUNT(1)
+					FROM
+						(
+							SELECT  
+								ii.code 
+							FROM 
+								INV_INVESTMENTS ii
+							WHERE 
+								ii.code IN 
+											(
+												SELECT 
+													ii2.code 
+												FROM 
+													PAC_MNT_PROJECTS pmp, INV_PROJECTS ip, INV_INVESTMENTS ii2
+												WHERE 
+													pmp.id = ip.PRID AND ii2.id = ip.prid AND pmp.DEPARTCODE NOT IN 
+																													( 
+																														SELECT 
+																															l.departcode 
+																														FROM 
+																															LOCATIONDEPT l
+																														)
+											)
+						
+						) CT
+								
+					]]></sql:query>
+	<!-- Query to retrieve Diamond Attestation Information -->
+	<sql:query escapeText="false" var="result13"><![CDATA[
+					select 'Number of Users active in Clarity with Diamond Attestation Flag set to False', count(1) validate_active_unattested_cnt from cmn_sec_users join srm_resources on
+					cmn_sec_users.id=srm_resources.user_id and cmn_sec_users.user_status_id=200 
+					join odf_ca_resource on srm_resources.id=odf_ca_resource.id and odf_ca_resource.td_diamondatt=0
+					union all
+					select 'Number of Active Users with no ACF2/NovellID value set', count(1) validate_nonsys_acf_cnt from cmn_sec_users  join srm_resources  on 
+					cmn_sec_users.id=srm_resources.user_id and cmn_sec_users.user_status_id=200 
+					join odf_ca_resource on srm_resources.id=odf_ca_resource.id and odf_ca_resource.td_diamondatt=1 and
+					NULLIF(trim(odf_ca_resource.td_acf2novell), '') IS NULL
+					union all
+					select 'Number of Groups with no description value set (From TD Group Exclusion Object)', count(1) from cmn_sec_groups_v  where 
+					id in(select g.gd_group_exclusion_l from odf_ca_gd_grp_exclusion  g,cmn_sec_user_groups  ug,
+					cmn_sec_users  u, odf_ca_resource , srm_resources  where g.gd_group_exclusion_l = ug.group_id 
+					and ug.user_id = u.id and u.user_status_id=200 and  srm_resources.id=odf_ca_resource.id and
+					u.id=srm_resources.user_id and odf_ca_resource.td_diamondatt=1 and 
+					NULLIF(trim(odf_ca_resource.td_acf2novell),'') IS NOT NULL and 
+					NULLIF(trim(g.gd_excl_grp_desc), '') IS NULL) and language_code='en' 
+                    group by id,group_name
+					union all
+					select 'Number of Active System Users with no Cost Centre value set', count(1) validate_sys_costcentre_cnt from cmn_sec_users  join srm_resources  on 
+					cmn_sec_users.id=srm_resources.user_id and cmn_sec_users.user_status_id=200 join odf_ca_resource  on 
+					srm_resources.id=odf_ca_resource.id and odf_ca_resource.td_diamondatt=1 and 
+					NULLIF(trim(odf_ca_resource.td_acf2novell), '') IS NOT NULL and td_sysacct=1 and 
+					NULLIF(trim(odf_ca_resource.td_costcenter), '') is null
+			
+					]]></sql:query>
+	<!-- Query to retrieve diamond Log Path -->
+	<sql:query escapeText="false" var="diam_path"><![CDATA[
+					SELECT TD_CONFIG_VALUE PATH FROM ODF_CA_TD_CONFIG 
+					WHERE TD_CONFIG_NAME = 'DIAMOND:LOGFOLDER']]></sql:query>
+	<!-- Query to retrieve Email ID's from Job Notification Group -->
+	<sql:query escapeText="false" var="emailTo1"><![CDATA[
+					SELECT 
+					GV.GROUP_NAME,
+					LISTAGG(EMAIL,',') WITHIN GROUP(ORDER BY RES.ID) EMAIL
+					FROM
+					CMN_SEC_GROUPS_V GV
+					INNER JOIN CMN_SEC_USER_GROUPS UG ON GV.ID = UG.GROUP_ID  AND GV.LANGUAGE_CODE = 'en'
+					INNER JOIN SRM_RESOURCES RES  ON RES.USER_ID=UG.USER_ID
+					WHERE
+					GV.GROUP_CODE = 'td_only_job_notifications' 
+					GROUP BY GV.GROUP_NAME]]></sql:query>
+	<!-- Query to retrieve all the Users in system and show as per Status -->
+	<sql:query escapeText="false" var="Users"><![CDATA[				
+										
+					SELECT 
+					CNT, 
+					COUNT(CNT) CNT1 
+					FROM
+					(
+						SELECT 
+					    (CASE WHEN USER_STATUS_ID =  200 THEN 'Active'
+							  WHEN USER_STATUS_ID =  201 THEN 'Inactive'
+							  WHEN USER_STATUS_ID =  202 THEN 'Lock' END ) CNT
+						FROM
+						CMN_SEC_USERS CMN
+          INNER JOIN SRM_RESOURCES SRM ON SRM.USER_ID = CMN.ID
+          WHERE
+          SRM.UNIQUE_NAME NOT IN (SELECT 'LR_'||DEPT.DEPARTCODE FROM DEPARTMENTS DEPT)
+					)
+					GROUP BY CNT
+
+					UNION ALL
+
+					SELECT 
+					'Total' ,
+					COUNT(CMN.ID)
+					FROM 
+					CMN_SEC_USERS CMN
+          INNER JOIN SRM_RESOURCES SRM ON SRM.USER_ID = CMN.ID
+          WHERE
+          SRM.UNIQUE_NAME NOT IN (SELECT 'LR_'||DEPT.DEPARTCODE FROM DEPARTMENTS DEPT)
+		  
+		  ]]></sql:query>
+	<!-- Query to retrieve Processes which ran more that 120 minutes -->
+	<sql:query escapeText="false" var="result14"><![CDATA[  SELECT 
+			        NLS.NAME NAME, 
+			        TO_CHAR(PROC.START_DATE+INTERVAL '3' Hour,'MM-DD-YYYY HH:MI:SS'),
+					ROUND((PROC.END_DATE - PROC.START_DATE)*24*60,2) DIFF_MINUTES
+			        FROM 
+                    BPM_RUN_PROCESSES PROC
+                    INNER JOIN  BPM_DEF_PROCESS_VERSIONS VER ON VER.ID = PROC.PROCESS_VERSION_ID
+                    INNER JOIN BPM_DEF_PROCESSES DEF  ON DEF.ID=VER.PROCESS_ID
+                    INNER JOIN CMN_CAPTIONS_NLS NLS ON NLS.TABLE_NAME='BPM_DEF_PROCESSES' AND NLS.LANGUAGE_CODE='en' AND NLS.PK_ID=DEF.ID
+					WHERE
+					PROC.START_DATE > SYSDATE -30 
+					AND (PROC.END_DATE-PROC.START_DATE)*24*60 > 120]]></sql:query>
+	<core:if test="${queryError1 != Null}">
+		<gel:log level="ERROR">SQL ERROR = ${queryError1} </gel:log>
+	</core:if>
+	<!-- Query to retrieve Generic ID's and Last Password Change Date -->
+	<sql:query escapeText="false" var="result15"><![CDATA[SELECT
+UNIQUE_NAME,
+LAST_PWD_CHANGE,
+CNT,
+LST_UPD_BY,
+LST_PRF_UPD_DT,
+LISTAGG(GP_NAME,',') WITHIN GROUP (ORDER BY GP_NAME) GP_NAMES
+FROM
+(
+SELECT 
+  TO_CHAR(SRM.UNIQUE_NAME) UNIQUE_NAME,
+  TO_CHAR(CMN.LAST_PWD_CHANGE,'MM/DD/YYYY') LAST_PWD_CHANGE,
+  CHNG_BY.LAST_NAME||', '||CHNG_BY.FIRST_NAME LST_UPD_BY,  
+  GV.GROUP_NAME GP_NAME,
+  (CASE WHEN CMN.USER_STATUS_ID =  200 THEN 'Active'
+							  WHEN CMN.USER_STATUS_ID =  201 THEN 'Inactive'
+							  WHEN CMN.USER_STATUS_ID =  202 THEN 'Lock' END ) CNT,
+  TO_CHAR(CMN.LAST_UPDATED_DATE,'MM/DD/YYYY') LST_PRF_UPD_DT
+  
+  FROM 
+  CMN_SEC_USERS CMN 
+  INNER JOIN SRM_RESOURCES SRM ON SRM.USER_ID = CMN.ID
+  LEFT JOIN CMN_SEC_USER_GROUPS UG ON SRM.USER_ID=UG.USER_ID
+  LEFT JOIN CMN_SEC_GROUPS_V GV ON GV.ID = UG.GROUP_ID  AND GV.LANGUAGE_CODE = 'en'
+  LEFT JOIN CMN_SEC_USERS CHNG_BY ON CHNG_BY.ID = CMN.LAST_UPDATED_BY
+  WHERE 
+  SRM.UNIQUE_NAME IN (${v_GenericUsers}) 
+)
+GROUP BY 
+UNIQUE_NAME,
+CNT,
+LAST_PWD_CHANGE,
+LST_PRF_UPD_DT,
+LST_UPD_BY
+  ]]></sql:query>
+	<!-- Query to retrieve User details in System Admin Group for Audit -->
+	<sql:query escapeText="false" var="result16"><![CDATA[SELECT
+					UNIQUE_NAME,
+					LAST_PWD_CHANGE,
+					CNT,
+					LST_UPD_BY,
+					LST_PRF_UPD_DT
+					FROM
+					(
+					SELECT 
+					TO_CHAR(SRM.UNIQUE_NAME) UNIQUE_NAME,
+					TO_CHAR(CMN.LAST_PWD_CHANGE,'MM/DD/YYYY') LAST_PWD_CHANGE,
+					CHNG_BY.LAST_NAME||', '||CHNG_BY.FIRST_NAME LST_UPD_BY,  
+					GV.GROUP_NAME GP_NAME,
+					(CASE WHEN CMN.USER_STATUS_ID =  200 THEN 'Active'
+												WHEN CMN.USER_STATUS_ID =  201 THEN 'Inactive'
+												WHEN CMN.USER_STATUS_ID =  202 THEN 'Lock' END ) CNT,
+					TO_CHAR(CMN.LAST_UPDATED_DATE,'MM/DD/YYYY') LST_PRF_UPD_DT
+					
+					FROM 
+					CMN_SEC_USERS CMN 
+					INNER JOIN SRM_RESOURCES SRM ON SRM.USER_ID = CMN.ID
+					INNER JOIN CMN_SEC_USER_GROUPS UG ON SRM.USER_ID=UG.USER_ID
+					INNER JOIN CMN_SEC_GROUPS_V GV ON GV.ID = UG.GROUP_ID  AND GV.LANGUAGE_CODE = 'en'
+					LEFT JOIN CMN_SEC_USERS CHNG_BY ON CHNG_BY.ID = CMN.LAST_UPDATED_BY
+					WHERE 
+					GV.GROUP_CODE = 'td_admin_functional'
+					AND GV.GROUP_ROLE_TYPE = 'GROUP'
+					)
+					GROUP BY 
+					UNIQUE_NAME,
+					CNT,
+					LAST_PWD_CHANGE,
+					LST_PRF_UPD_DT,
+					LST_UPD_BY
+  ]]></sql:query>
+	<gel:log>To Email - ${emailTo1.rows[0].EMAIL}</gel:log>
+	<core:forEach items="${result4.rowsByIndex}" trim="false" var="rowinit">
+		<core:set value="${rowinit[0]}" var="day"/>
+		<core:set value="${rowinit[1]}" var="date"/>
+		<core:set value="${rowinit[2]}" var="time"/>
+	</core:forEach>
+	<core:set value="ca_support@dummy.com" var="hyplnk1"/>
+	<core:set value="od_admin@dummy.com" var="hyplnk2"/>
+	<!-- Set MailAgent -->
+	<core:invokeStatic className="java.lang.Class" method="forName" var="recipientType">
+		<core:arg type="java.lang.String" value="javax.mail.Message$RecipientType"/>
+	</core:invokeStatic>
+	<core:set value="${recipientType.getField('TO')}" var="recipientTypeTO"/>
+	<core:set value="${recipientTypeTO.TO}" var="recipientTypeTO"/>
+	<core:set value="${recipientType.getField('CC')}" var="recipientTypeCC"/>
+	<core:set value="${recipientTypeCC.CC}" var="recipientTypeCC"/>
+	<core:set value="${recipientType.getField('BCC')}" var="recipientTypeBCC"/>
+	<core:set value="${recipientTypeBCC.BCC}" var="recipientTypeBCC"/>
+	<!-- Initiate a new java mail session -->
+	<core:new className="java.util.Properties" var="props"/>
+	<core:set value="${props.put('mail.transport.protocol', 'smtp')}" var="void"/>
+	<core:set value="${props.put('mail.smtp.host', customSMTPServer)}" var="void"/>
+	<core:set value="${props.put('mail.smtp.auth', 'true')}" var="void"/>
+	<core:new className="com.niku.union.notification.MailAuthenticator" var="clarity_auth"/>
+	<core:invokeStatic className="javax.mail.Session" method="getInstance" var="mailSession">
+		<core:arg type="java.util.Properties" value="${props}"/>
+		<core:arg type="javax.mail.Authenticator" value="${clarity_auth}"/>
+	</core:invokeStatic>
+	<!-- Add HTML email message -->
+	<gel:parse var="htmlMessage">
+		<message><![CDATA[
+				<html><BR><header><img src="http://www.td.com/images/evergreen/logos/td_shield.gif"/><p style="width:100%; height:14px; float:left; background:#007701; color:#fff; margin:8px 0; font-size:8.0pt; padding:4px 2px; font-family:'Arial',sans-serif; font-weight:bold;">You have received a Email Notification</p></header><style><body><font face = "verdana"><b><center>PPM Health Check Report - ${date} - ${day} - ${time}</b></center><BR><BR><!-- THIS PRINTS THE HEALTH CHECK REPORT IN THE FORM OF A TABLE --><style>
+							table, th, td {
+								
+								border-collapse: collapse;
+								font-family: verdana;
+							}
+							th, td {
+								padding: 5px;
+							
+							}
+			
+						.noBorder {
+							"border-collapse: collapse; border: none;"
+							 vertical-align:top;
+						  }
+						  
+						.not-active,.not-active:hover {
+						pointer-events: none;
+						cursor: default;
+						color:black;
+						}
+								
+						</style><BR>
+						1. Summary (Last 24 Hours)
+						<BR><BR><table border="1"><tr><th bgcolor="#70AD47">Check Type </th><th bgcolor="#70AD47">Status </th><th bgcolor="#70AD47">Total </th><th bgcolor="#70AD47">Failed </th></tr>
+
+						]]><core:forEach items="${result.rowsByIndex}" trim="false" var="v"><![CDATA[
+							<tr><td><center>${v[0]} </center></td>
+							]]><core:if test="${v[1] == 'OK'}"><![CDATA[
+								<td><center><font color = "green"> ${v[1]} </font></center></td>
+								]]></core:if>
+				<core:if test="${v[1] == 'Error'}"><![CDATA[
+								<td><center><font color = "red"> ${v[1]} </font></center></td>
+								]]></core:if><![CDATA[
+							<td><center>${v[2]} </center></td><td><center>${v[3]} </center></td></tr>
+						]]></core:forEach>
+			<core:forEach items="${result2.rowsByIndex}" trim="false" var="v2">
+				<tr>
+					<td>
+						<center>${v2[0]}</center>
+					</td>
+					<core:choose>
+						<core:when test="${v2[1] == 'Error'}">
+							<td>
+								<center>
+									<font color="red">${v2[1]}</font>
+								</center>
+							</td>
+						</core:when>
+						<core:when test="${v2[1] == 'OK'}">
+							<td>
+								<center>
+									<font color="green">${v2[1]}</font>
+								</center>
+							</td>
+						</core:when>
+						<core:otherwise>
+							<td>
+								<center>${v2[1]}</center>
+							</td>
+						</core:otherwise>
+					</core:choose>
+					<td>
+						<center>Last updated: ${v2[4]}</center>
+					</td>
+				</tr>
+			</core:forEach>
+			<core:forEach items="${result3.rowsByIndex}" trim="false" var="v3"><![CDATA[
+							<tr><td><center>${v3[0]} </center></td><td><center>${v3[1]} </center></td><td><center>Last updated: ${v3[5]}</center></td></tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+						2. Current Status of Process instances (Total) 
+						<BR><BR><table border="1"><tr><th bgcolor="#70AD47">Status </th><th bgcolor="#70AD47">Total </th><th bgcolor="#70AD47">Comments </th></tr>
+						]]><core:forEach items="${result7a.rowsByIndex}" trim="false" var="result7a"><![CDATA[
+							<tr><td><center>${result7a[0]} </center></td><td><center>${result7a[1]} </center></td><td><center>${result7a[2]} </center></td></tr>
+						]]></core:forEach>
+			<core:forEach items="${result7c.rowsByIndex}" trim="false" var="result7c"><![CDATA[
+							<tr><td><center>${result7c[0]} </center></td><td><center>${result7c[1]} </center></td><td>Start date of the oldest error process: ]]><core:forEach items="${result7ci.rowsByIndex}" trim="false" var="result7ci">${result7ci[0]}</core:forEach><![CDATA[ </td></tr>
+						]]></core:forEach>
+			<core:forEach items="${result7d.rowsByIndex}" trim="false" var="result7d"><![CDATA[
+							<tr><td><center>${result7d[0]} </center></td><td><center>${result7d[1]} </center></td><td>Start date of the oldest running process: ]]><core:forEach items="${result7di.rowsByIndex}" trim="false" var="result7di">${result7di[0]}</core:forEach><![CDATA[ </td></tr>
+						]]></core:forEach>
+			<core:forEach items="${result7d.rowsByIndex}" trim="false" var="result7d"><![CDATA[
+							<tr><td><center>${result7d[0]} </center></td><td><center>${result7d[1]} </center></td><td><center>${result7d[2]} </center></td></tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+
+					  3. User Information (Total)
+					  <BR><BR><table border="1"><tr><th bgcolor="#70AD47">Users</th><th bgcolor="#70AD47">Count</th></tr>]]><core:forEach items="${Users.rowsByIndex}" trim="false" var="User"><![CDATA[
+						<tr>]]><core:if test="${User[0] == 'Total'}"><![CDATA[
+							<B><td>${User[0]}</td><td><center>${User[1]}</center></td></B>
+						]]></core:if>
+				<core:if test="${User[0] != 'Total'}"><![CDATA[					
+							<td>${User[0]}</td><td><center>${User[1]}</center></td>]]></core:if><![CDATA[							
+						</tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+					4. Additional Information
+						<BR><BR><table border="1"><tr><th bgcolor="#70AD47">Check Type</th><th bgcolor="#70AD47">Total</th></tr>
+						]]><core:forEach items="${result12.rowsByIndex}" trim="false" var="result12"><![CDATA[
+						<tr><td>${result12[0]}</td><td><center>${result12[1]} </center></td></tr>
+						]]></core:forEach><![CDATA[
+						</table></td><BR><BR>						
+                     5. TD Diamond Attestation Information
+					 <BR><BR><table border="1"><tr><th bgcolor="#70AD47">Check Type</th><th bgcolor="#70AD47">Total</th></tr>
+						]]><core:forEach items="${result13.rowsByIndex}" trim="false" var="result13"><![CDATA[
+						<tr><td>${result13[0]}</td><td><center>${result13[1]} </center></td></tr>
+						]]></core:forEach><![CDATA[               					 
+					</table></td><BR><B>Diamond Attesation Log Folder Path:  </B>]]>${diam_path.rows[0].PATH}<![CDATA[
+						<BR><BR>
+				6. Additional Information		
+				        <BR><BR><td ><table border="1"><tr><th bgcolor="#70AD47">Check Type</th><th bgcolor="#70AD47">Total</th><th bgcolor="#70AD47">Existing from Date</th></tr>
+						]]><core:forEach items="${result8.rowsByIndex}" trim="false" var="result8"><![CDATA[
+						<tr><td>${result8[0]}</td><td><center>${result8[2]} </center></td><td><center>${result8[1]} </center></td></tr>
+						]]></core:forEach>
+			<core:forEach items="${result9.rowsByIndex}" trim="false" var="result9"><![CDATA[
+						<tr><td>${result9[0]}</td><td><center>${result9[2]} </center></td><td><center>${result9[1]} </center></td></tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+						7. Process Error Count (Last 24 hours)
+						<BR><BR><table border="1"><tr><th bgcolor="#70AD47">Process Name</th><th bgcolor="#70AD47">Count</th></tr>
+						]]><core:forEach items="${result11.rowsByIndex}" trim="false" var="result11"><![CDATA[
+						<tr><td>${result11[0]}</td><td><center>${result11[1]} </center></td></tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+						8. Jobs running over 60 minutes (Last 30 days)
+						<BR><BR><table border="1"><tr><th bgcolor="#70AD47">Job Name</th><th bgcolor="#70AD47">Run ID</th><th bgcolor="#70AD47">Start Date</th><th bgcolor="#70AD47">Runtime (in minutes)</th></tr>
+						]]><core:forEach items="${result10.rowsByIndex}" trim="false" var="result10"><![CDATA[
+						<tr><td>${result10[0]}</td><td><center>${result10[1]} </center></td><td><center>${result10[2]} </center></td><td><center>${result10[3]} </center></td></tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+				9. Process running over 120 minutes (Last 30 days)
+						<BR><BR><table border="1"><tr><th bgcolor="#70AD47">Process Name</th><th bgcolor="#70AD47">Start Date</th><th bgcolor="#70AD47">Runtime (in minutes)</th></tr>
+						]]><core:forEach escapeText="false" items="${result14.rowsByIndex}" trim="false" var="result10"><![CDATA[
+						<tr><td>${result10[0]}</td><td><center>${result10[1]} </center></td><td><center>${result10[2]} </center></td></tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+				10.	Generic ID Password Change 
+				        <BR><BR><table border="1" ><tr><th bgcolor="#70AD47">Generic ID</th><th bgcolor="#70AD47">Last Password Change Date</th><th bgcolor="#70AD47">Status</th><th bgcolor="#70AD47">Last Profile Updated By</th><th bgcolor="#70AD47">Last Profile Updated Date</th><th bgcolor="#70AD47">Associated Groups</th></tr>
+						]]><core:forEach items="${result15.rowsByIndex}" trim="false" var="result15"><![CDATA[
+						<tr ><td><a href="" class = "not-active"  style="text-decoration:none;"> ${result15[0]}</a></td><td ><center>${result15[1]}</center></td><td><center>${result15[2]}</center></td><td><center>${result15[3]}</center></td><td><center>${result15[4]}</center></td><td><center>${result15[5]}</center></tr>
+						]]></core:forEach><![CDATA[
+						</table><BR><BR>
+				11.	Clarity Admin Group Log (System Administrator - Functional)
+				        <BR><BR><table border="1" ><tr><th bgcolor="#70AD47">Resource ID</th><th bgcolor="#70AD47">Status</th><th bgcolor="#70AD47">Last Profile Updated By</th><th bgcolor="#70AD47">Last Profile Updated Date</th></tr>
+						]]><core:forEach items="${result16.rowsByIndex}" trim="false" var="result16"><![CDATA[
+						<tr ><td><a href="" class = "not-active"  style="text-decoration:none;"> ${result16[0]}</a></td><td><center>${result16[2]}</center></td><td><center>${result16[3]}</center></td><td><center>${result16[4]}</center></td></tr>
+						]]></core:forEach><![CDATA[				
+						</table><BR><BR><B><u>Thank & Regards,</u><BR><BR>
+						TD AMS Team</B><BR></B><BR></font><footer><p style="width:100%; height:14px; float:left; background:#007701; font-style:italic; color:#fff; margin:8px 0; font-size:7.9pt; padding:4px 2px; font-family:'Arial',sans-serif; font-weight:bold;" >This is system generated mail. Please do not reply.</p></footer></body></html>
+				]]></message>
+	</gel:parse>
+	<gel:forEach select="$htmlMessage/message/node()" var="thisMessageNode">
+		<gel:set asString="true" select="$thisMessageNode" var="thisMessageNodeText"/>
+		<core:set value="${thisMessageText}${thisMessageNodeText}" var="thisMessageText"/>
+	</gel:forEach>
+	<!-- Add sender -->
+	<core:new className="javax.mail.internet.InternetAddress" var="sender">
+		<core:arg type="java.lang.String" value="${emailFrom}"/>
+	</core:new>
+	<!-- Add recipients -->
+	<core:new className="javax.mail.internet.InternetAddress" var="internetAddress"/>
+	<core:set value="${emailTo1.rows[0].EMAIL}" var="recipientsTO"/>
+	<!-- Add subject -->
+	<core:set value="$PPM Health Check Report (${env}) - ${date}" var="subject"/>
+	<!-- Add email body text and format -->
+	<core:new className="javax.mail.internet.MimeMultipart" var="multiPart"/>
+	<core:new className="javax.mail.internet.MimeBodyPart" var="bodyPart"/>
+	<core:set value="${bodyPart.setContent(thisMessageText, 'text/html')}" var="void"/>
+	<core:set value="${multiPart.addBodyPart(bodyPart)}" var="void"/>
+	<!-- Send email message -->
+	<core:new className="javax.mail.internet.MimeMessage" var="message">
+		<core:arg type="javax.mail.Session" value="${mailSession}"/>
+	</core:new>
+	<core:set value="${mailSession.setDebug(debug)}" var="void"/>
+	<core:set value="${message.setFrom(sender)}" var="void"/>
+	<core:choose>
+		<core:when test="${recipientsTO.indexOf(',') > 0}">
+			<core:set value="${message.setRecipients(recipientTypeTO, internetAddress.parse(recipientsTO))}" var="void"/>
+		</core:when>
+		<core:otherwise>
+			<core:new className="javax.mail.internet.InternetAddress" var="recipientsTO">
+				<core:arg type="java.lang.String" value="${recipientsTO}"/>
+			</core:new>
+			<core:set value="${message.setRecipient(recipientTypeTO, recipientsTO)}" var="void"/>
+		</core:otherwise>
+	</core:choose>
+	<core:set value="${message.setSubject(subject)}" var="void"/>
+	<core:set value="${message.setContent(multiPart)}" var="void"/>
+	<core:set value="${mailSession.getTransport()}" var="transport"/>
+	<core:set value="${transport.connect()}" var="void"/>
+	<core:switch on="${transport.isConnected()}">
+		<core:case value="${true}">
+			<core:set value="${transport.send(message)}" var="void"/>
+			<core:set value="${transport.close()}" var="void"/>
+		</core:case>
+		<core:default>
+			<core:new className="java.lang.Exception" var="exception">
+				<gel:log level="ERROR">"Cannot connect to mail server: ${MailServer}"</gel:log>
+			</core:new>
+		</core:default>
+	</core:switch>
+</gel:script>
+</textarea>
 	
 	
 </body>
